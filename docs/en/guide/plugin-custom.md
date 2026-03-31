@@ -23,3 +23,15 @@ export function myPlugin(editor: Editor, options?: Option) {
 ```javascript
 instance.use(myPlugin, options?: Option)
 ```
+
+## jsPDF Plugin Example
+
+```javascript
+import { jspdfPlugin } from '../../src/plugins/jspdf'
+
+instance.use(jspdfPlugin, {
+  fonts: {
+    SimSun: 'https://example.com/fonts/simsun.ttf'
+  }
+})
+```

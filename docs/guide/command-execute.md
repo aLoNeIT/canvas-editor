@@ -706,6 +706,20 @@ instance.command.executeReplace(newWord: string, option?: IReplaceOption)
 instance.command.executePrint()
 ```
 
+## executeExportPdfBase64
+
+功能：导出 PDF base64 字符串
+
+用法：
+
+```javascript
+instance.command.executeExportPdfBase64({
+  fonts: {
+    SimSun: 'https://example.com/fonts/simsun.ttf'
+  }
+})
+```
+
 ## executeReplaceImageElement
 
 功能：替换图片

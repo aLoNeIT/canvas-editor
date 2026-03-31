@@ -2,6 +2,7 @@ import './assets/css/index.css'
 import { version } from '../../package.json'
 import { IEditorData, IEditorOption, IEditorResult } from './interface/Editor'
 import { IElement } from './interface/Element'
+import { IPdfExportPageSnapshot, IPdfExportSnapshot } from './interface/Draw'
 import { Draw } from './core/draw/Draw'
 import { Command } from './core/command/Command'
 import { CommandAdapt } from './core/command/CommandAdapt'
@@ -226,6 +227,8 @@ export type {
   IEditorData,
   IEditorOption,
   IEditorResult,
+  IPdfExportPageSnapshot,
+  IPdfExportSnapshot,
   IContextMenuContext,
   IRegisterContextMenu,
   IWatermark,

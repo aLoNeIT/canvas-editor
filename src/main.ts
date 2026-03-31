@@ -25,6 +25,7 @@ import Editor, {
 import { Dialog } from './components/dialog/Dialog'
 import { formatPrismToken } from './utils/prism'
 import { Signature } from './components/signature/Signature'
+import { jspdfPlugin, type CommandWithJspdf } from './plugins/jspdf'
 import { debounce, nextTick, scrollIntoView } from './utils'
 
 window.onload = function () {
@@ -62,11 +63,42 @@ window.onload = function () {
     },
     options
   )
+  instance.use(jspdfPlugin, {
+    fonts: {
+      SimSun: 'https://example.com/fonts/simsun.ttf'
+    }
+  })
   console.log('实例: ', instance)
   // cypress使用
   Reflect.set(window, 'editor', instance)
   // canvas-editor-devtools使用
   Reflect.set(window, '__CANVAS_EDITOR_INSTANCE__', instance)
+  if (import.meta.env.DEV) {
+    const exportPdfBase64 = async () => {
+      const pdfBase64 = await (
+        instance.command as CommandWithJspdf
+      ).executeExportPdfBase64()
+      const pdfHeader = atob(pdfBase64).slice(0, 4)
+      console.log('pdf header', pdfHeader)
+      console.log('pdf base64 length', pdfBase64.length)
+      return pdfBase64
+    }
+    Reflect.set(window, '__exportPdfBase64', exportPdfBase64)
+    Reflect.set(window, '__exportPdf', async () => {
+      const pdfBase64 = await exportPdfBase64()
+      const pdfBinary = atob(pdfBase64)
+      const bytes = Uint8Array.from(pdfBinary, char => char.charCodeAt(0))
+      const blob = new Blob([bytes], { type: 'application/pdf' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'canvas-editor-export.pdf'
+      document.body.append(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    })
+  }
 
   // 菜单弹窗销毁
   window.addEventListener(

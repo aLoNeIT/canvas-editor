@@ -1,5 +1,5 @@
 import { ImageDisplay } from '../dataset/enum/Common'
-import { EditorMode, EditorZone } from '../dataset/enum/Editor'
+import { EditorMode, EditorZone, PaperDirection } from '../dataset/enum/Editor'
 import { IElement, IElementPosition } from './Element'
 import { IRow } from './Row'
 
@@ -84,4 +84,33 @@ export interface IComputeRowListPayload {
   pageHeight?: number
   mainOuterHeight?: number
   surroundElementList?: IElement[]
+}
+
+export interface IPdfExportPageSnapshot {
+  readonly pageNo: number
+  readonly width: number
+  readonly height: number
+  readonly rowList: ReadonlyArray<IRow>
+  readonly positionList: ReadonlyArray<IElementPosition>
+}
+
+export interface IPdfExportStyleSnapshot {
+  readonly scale: number
+  readonly defaultSize: number
+  readonly defaultBasicRowMarginHeight: number
+  readonly defaultRowMargin: number
+  readonly underlineColor: string
+  readonly strikeoutColor: string
+  readonly highlightAlpha: number
+  readonly highlightMarginHeight: number
+}
+
+export interface IPdfExportSnapshot {
+  readonly pageDirection: PaperDirection
+  readonly pageWidth: number
+  readonly pageHeight: number
+  readonly pageList: ReadonlyArray<IPdfExportPageSnapshot>
+  readonly elementList: ReadonlyArray<IElement>
+  readonly styleOptions: IPdfExportStyleSnapshot
+  readonly controlHighlights: Readonly<Record<number, string>>
 }
