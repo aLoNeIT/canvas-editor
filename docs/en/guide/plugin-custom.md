@@ -35,3 +35,27 @@ instance.use(jspdfPlugin, {
   }
 })
 ```
+
+### jsPDF Plugin Notes
+
+- `jspdfPlugin` owns its own document normalization, pagination, layout, and PDF rendering pipeline
+- The editor core only exposes neutral read-only capabilities such as `getValue()` and `getOptions()`
+- The core no longer exposes any PDF-specific API and does not provide `getPdfExportSnapshot`
+
+```javascript
+import { jspdfPlugin, type CommandWithJspdf } from '../../src/plugins/jspdf'
+
+instance.use(jspdfPlugin, {
+  fonts: {
+    SimSun: 'https://example.com/fonts/simsun.ttf'
+  }
+})
+
+const pdfBase64 = await (instance.command as CommandWithJspdf)
+  .executeExportPdfBase64()
+
+const diagnostics = await (instance.command as CommandWithJspdf)
+  .executeExportPdfDiagnostics({
+    debug: true
+  })
+```

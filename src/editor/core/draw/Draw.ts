@@ -11,8 +11,7 @@ import {
   IGetImageOption,
   IGetOriginValueOption,
   IGetValueOption,
-  IPainterOption,
-  IPdfExportSnapshot
+  IPainterOption
 } from '../../interface/Draw'
 import {
   IEditorData,
@@ -615,49 +614,6 @@ export class Draw {
 
   public getPageRowList(): IRow[][] {
     return this.pageRowList
-  }
-
-  public getPdfExportSnapshot(): IPdfExportSnapshot {
-    const options = this.getOptions()
-    const pageRowList = this.getPageRowList()
-    const positionList = deepClone(this.position.getOriginalMainPositionList())
-
-    return {
-      pageDirection: options.paperDirection,
-      pageWidth: options.width,
-      pageHeight: options.height,
-      elementList: deepClone(this.getOriginalMainElementList()),
-      styleOptions: {
-        scale: options.scale,
-        defaultSize: options.defaultSize,
-        defaultBasicRowMarginHeight: options.defaultBasicRowMarginHeight,
-        defaultRowMargin: options.defaultRowMargin,
-        underlineColor: options.underlineColor,
-        strikeoutColor: options.strikeoutColor,
-        highlightAlpha: options.highlightAlpha,
-        highlightMarginHeight: this.getHighlightMarginHeight()
-      },
-      controlHighlights: this.getOriginalMainElementList().reduce(
-        (highlightMap, _element, index) => {
-          const highlight = this.control.getControlHighlight(
-            this.getOriginalMainElementList(),
-            index
-          )
-          if (highlight) {
-            highlightMap[index] = highlight
-          }
-          return highlightMap
-        },
-        {} as Record<number, string>
-      ),
-      pageList: pageRowList.map((rowList, pageNo) => ({
-        pageNo,
-        width: options.width,
-        height: options.height,
-        rowList: deepClone(rowList),
-        positionList: positionList.filter(position => position.pageNo === pageNo)
-      }))
-    }
   }
 
   public getCtx(): CanvasRenderingContext2D {

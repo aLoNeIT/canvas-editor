@@ -708,16 +708,48 @@ instance.command.executePrint()
 
 ## executeExportPdfBase64
 
-功能：导出 PDF base64 字符串
+功能：通过 `jspdf` 插件内独立排版引擎导出 PDF Base64。
 
 用法：
 
 ```javascript
-instance.command.executeExportPdfBase64({
+import { jspdfPlugin, type CommandWithJspdf } from '../../src/plugins/jspdf'
+
+instance.use(jspdfPlugin, {
   fonts: {
     SimSun: 'https://example.com/fonts/simsun.ttf'
   }
 })
+
+const pdfBase64 = await (instance.command as CommandWithJspdf)
+  .executeExportPdfBase64({
+    debug: false
+  })
+```
+
+说明：
+- `executeExportPdfBase64` 由 `jspdfPlugin` 注入，不属于核心内置命令
+- 导出链路基于插件内的归一化、分页与渲染流程，不依赖核心 PDF 快照
+- 核心不再暴露 `getPdfExportSnapshot`
+
+## executeExportPdfDiagnostics
+
+功能：返回 `jspdf` 插件导出诊断信息，用于检查页数、布局告警和局部 fallback。
+
+用法：
+
+```javascript
+import { jspdfPlugin, type CommandWithJspdf } from '../../src/plugins/jspdf'
+
+instance.use(jspdfPlugin)
+
+const diagnostics = await (instance.command as CommandWithJspdf)
+  .executeExportPdfDiagnostics({
+    debug: true
+  })
+
+console.log(diagnostics.pageCount)
+console.log(diagnostics.layoutWarnings)
 ```
 
 ## executeReplaceImageElement

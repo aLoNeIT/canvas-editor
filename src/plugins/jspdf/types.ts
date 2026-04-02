@@ -7,6 +7,8 @@ export interface IPdfTextRun {
   height: number
   font: string
   size: number
+  opacity?: number
+  rotate?: number
   bold?: boolean
   italic?: boolean
   color?: string
@@ -49,6 +51,8 @@ export interface IPdfRasterBlock {
   width: number
   height: number
   dataUrl: string
+  opacity?: number
+  rotate?: number
   sourceType?: string
   debugLabel?: string
 }

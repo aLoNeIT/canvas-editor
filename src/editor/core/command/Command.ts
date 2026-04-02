@@ -121,7 +121,6 @@ export class Command {
   public getCatalog: CommandAdapt['getCatalog']
   public getImage: CommandAdapt['getImage']
   public getOptions: CommandAdapt['getOptions']
-  public getPdfExportSnapshot: CommandAdapt['getPdfExportSnapshot']
   public getValue: CommandAdapt['getValue']
   public getValueAsync: CommandAdapt['getValueAsync']
   public getAreaValue: CommandAdapt['getAreaValue']
@@ -273,7 +272,6 @@ export class Command {
     // 获取
     this.getImage = adapt.getImage.bind(adapt)
     this.getOptions = adapt.getOptions.bind(adapt)
-    this.getPdfExportSnapshot = adapt.getPdfExportSnapshot.bind(adapt)
     this.getValue = adapt.getValue.bind(adapt)
     this.getValueAsync = adapt.getValueAsync.bind(adapt)
     this.getHTML = adapt.getHTML.bind(adapt)

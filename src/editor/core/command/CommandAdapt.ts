@@ -46,8 +46,7 @@ import {
   IForceUpdateOption,
   IGetImageOption,
   IGetValueOption,
-  IPainterOption,
-  IPdfExportSnapshot
+  IPainterOption
 } from '../../interface/Draw'
 import {
   IEditorData,
@@ -1458,10 +1457,6 @@ export class CommandAdapt {
 
   public getOptions(): DeepRequired<IEditorOption> {
     return this.options
-  }
-
-  public getPdfExportSnapshot(): IPdfExportSnapshot {
-    return this.draw.getPdfExportSnapshot()
   }
 
   public getValue(options?: IGetValueOption): IEditorResult {

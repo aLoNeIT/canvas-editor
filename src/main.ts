@@ -84,6 +84,9 @@ window.onload = function () {
       return pdfBase64
     }
     Reflect.set(window, '__exportPdfBase64', exportPdfBase64)
+    Reflect.set(window, '__exportPdfDiagnostics', () =>
+      (instance.command as CommandWithJspdf).executeExportPdfDiagnostics()
+    )
     Reflect.set(window, '__exportPdf', async () => {
       const pdfBase64 = await exportPdfBase64()
       const pdfBinary = atob(pdfBase64)

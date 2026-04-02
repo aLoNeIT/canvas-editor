@@ -2,8 +2,10 @@ import jsPDF from 'jspdf'
 import type { PaperDirection } from '../../editor'
 import { bootstrapPdfFonts } from './font'
 import type { IFontBootstrapOption } from './font'
-import { resolvePdfFontFamily } from './font'
-import type { IPdfPageModel, IPdfRasterBlock } from './types'
+import type { IPageModel } from './model/layout'
+import { renderImages } from './render/renderImage'
+import { renderTextRuns } from './render/renderText'
+import { renderVectorLines } from './render/renderVector'
 
 export interface IRenderPdfOption extends IFontBootstrapOption {
   paperDirection?: PaperDirection
@@ -25,53 +27,8 @@ function stripPdfDataUriPrefix(dataUri: string) {
   return dataUri.slice(index + 'base64,'.length)
 }
 
-function getImageFormat(dataUrl: string): 'PNG' | 'JPEG' | 'WEBP' {
-  if (dataUrl.startsWith('data:image/jpeg') || dataUrl.startsWith('data:image/jpg')) {
-    return 'JPEG'
-  }
-  if (dataUrl.startsWith('data:image/webp')) {
-    return 'WEBP'
-  }
-  return 'PNG'
-}
-
-function loadImage(dataUrl: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image()
-    image.crossOrigin = 'anonymous'
-    image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error(`Failed to load raster block: ${dataUrl.slice(0, 64)}`))
-    image.src = dataUrl
-  })
-}
-
-async function resolveRasterData(raster: IPdfRasterBlock) {
-  if (/^data:image\/(png|jpeg|jpg|webp);base64,/.test(raster.dataUrl)) {
-    return {
-      dataUrl: raster.dataUrl,
-      format: getImageFormat(raster.dataUrl)
-    }
-  }
-
-  const image = await loadImage(raster.dataUrl)
-  const width = Math.max(1, Math.ceil(raster.width))
-  const height = Math.max(1, Math.ceil(raster.height))
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    throw new Error(`Failed to rasterize ${raster.debugLabel || raster.sourceType || 'image block'}`)
-  }
-  ctx.drawImage(image, 0, 0, width, height)
-  return {
-    dataUrl: canvas.toDataURL('image/png'),
-    format: 'PNG' as const
-  }
-}
-
 export async function renderPdfBase64(
-  pageModels: IPdfPageModel[],
+  pageModels: IPageModel[],
   options: IRenderPdfOption = {}
 ) {
   if (!pageModels.length) {
@@ -93,7 +50,7 @@ export async function renderPdfBase64(
 
   const { defaultFontFamily } = await bootstrapPdfFonts(doc, options)
 
-  const renderPage = async (page: IPdfPageModel) => {
+  const renderPage = async (page: IPageModel) => {
     page.highlightRects.forEach(rect => {
       const gStateCtor = (doc as any).GState
       if (gStateCtor && typeof doc.setGState === 'function') {
@@ -106,31 +63,9 @@ export async function renderPdfBase64(
       }
     })
 
-    page.textRuns.forEach(textRun => {
-      doc.setFont(
-        resolvePdfFontFamily(doc, textRun.font, defaultFontFamily),
-        'normal'
-      )
-      doc.setFontSize(textRun.size)
-      doc.setTextColor(textRun.color || '#000000')
-      doc.text(textRun.text, textRun.x, textRun.y)
-    })
-
-    page.vectorLines.forEach(line => {
-      doc.setDrawColor(line.color || '#000000')
-      doc.setLineWidth(line.width || 1)
-      if (line.dash?.length) {
-        doc.setLineDashPattern(line.dash, 0)
-      } else {
-        doc.setLineDashPattern([], 0)
-      }
-      doc.line(line.x1, line.y1, line.x2, line.y2)
-    })
-
-    for (const raster of page.rasterBlocks) {
-      const { dataUrl, format } = await resolveRasterData(raster)
-      doc.addImage(dataUrl, format, raster.x, raster.y, raster.width, raster.height)
-    }
+    renderTextRuns(doc, page, defaultFontFamily)
+    renderVectorLines(doc, page)
+    await renderImages(doc, page)
 
     page.links.forEach(link => {
       doc.link(link.x, link.y, link.width, link.height, {
