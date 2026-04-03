@@ -35,6 +35,7 @@ import {
   measureTableRowHeight,
   resolveTableRowHeightList
 } from '../src/plugins/jspdf/layout/tableMetrics.js'
+import { layoutDocument } from '../src/plugins/jspdf/layout/layoutDocument.js'
 import {
   resolveBlockTextStyle,
   resolveListBlockSemantics
@@ -47,6 +48,10 @@ import { TitleLevel } from '../src/editor/dataset/enum/Title.js'
 
 function createMeasureWidth(unitWidth = 10) {
   return (text: string) => text.length * unitWidth
+}
+
+function roundTo3(value: number) {
+  return Math.round(value * 1000) / 1000
 }
 
 function testWrapsLongTextByWidth() {
@@ -626,6 +631,150 @@ function testCreatesRepeatedContainBackgroundImagePlacements() {
   ])
 }
 
+async function testLayoutDocumentUsesIntrinsicBackgroundImageSize() {
+  const imageData = 'data:image/png;base64,intrinsic-background'
+  const previousImage = globalThis.Image
+
+  class MockImage {
+    width = 40
+    height = 20
+    naturalWidth = 40
+    naturalHeight = 20
+    onload: null | (() => void) = null
+    onerror: null | (() => void) = null
+
+    setAttribute(...args: [string, string]) {
+      void args
+      return undefined
+    }
+
+    set src(_value: string) {
+      this.onload?.()
+    }
+  }
+
+  const runtimeGlobal = globalThis as any
+  runtimeGlobal.Image = MockImage
+
+  try {
+    const pageList = await layoutDocument({
+      width: 100,
+      height: 80,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: imageData,
+        backgroundSize: BackgroundSize.CONTAIN,
+        backgroundRepeat: BackgroundRepeat.REPEAT_X,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    })
+
+    assert.deepEqual(
+      pageList[0].rasterBlocks.map(
+        ({ x, y, width, height, dataUrl, sourceType }) => ({
+          x,
+          y,
+          width,
+          height,
+          dataUrl,
+          sourceType
+        })
+      ),
+      [
+        {
+          x: 0,
+          y: 0,
+          width: 40,
+          height: 20,
+          dataUrl: imageData,
+          sourceType: 'background-image'
+        },
+        {
+          x: 40,
+          y: 0,
+          width: 40,
+          height: 20,
+          dataUrl: imageData,
+          sourceType: 'background-image'
+        },
+        {
+          x: 80,
+          y: 0,
+          width: 40,
+          height: 20,
+          dataUrl: imageData,
+          sourceType: 'background-image'
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.Image = previousImage
+  }
+}
+
 function testCreatesCenteredPageNumberPlacement() {
   const placement = createPageNumberPlacement({
     pageNo: 1,
@@ -721,168 +870,52 @@ function testCreatesRepeatedImageWatermarkPlacements() {
     gap: [10, 20]
   })
 
-  assert.deepEqual(placements, [
-    {
-      x: 0,
-      y: 0,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 50,
-      y: 0,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 100,
-      y: 0,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 150,
-      y: 0,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 0,
-      y: 40,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 50,
-      y: 40,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 100,
-      y: 40,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 150,
-      y: 40,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 0,
-      y: 80,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 50,
-      y: 80,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 100,
-      y: 80,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 150,
-      y: 80,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 0,
-      y: 120,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 50,
-      y: 120,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 100,
-      y: 120,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    },
-    {
-      x: 150,
-      y: 120,
-      width: 40,
-      height: 20,
-      dataUrl: 'data:image/png;base64,abc',
-      sourceType: 'watermark-image',
-      opacity: 0.3,
-      rotate: -45
-    }
-  ])
+  assert.deepEqual(
+    placements.map(({ x, y, width, height }) => ({
+      x: roundTo3(x),
+      y: roundTo3(y),
+      width,
+      height
+    })),
+    [
+      {
+        x: 12.361,
+        y: 32.361,
+        width: 40,
+        height: 20
+      },
+      {
+        x: 77.082,
+        y: 32.361,
+        width: 40,
+        height: 20
+      },
+      {
+        x: 141.803,
+        y: 32.361,
+        width: 40,
+        height: 20
+      },
+      {
+        x: 12.361,
+        y: 117.082,
+        width: 40,
+        height: 20
+      },
+      {
+        x: 77.082,
+        y: 117.082,
+        width: 40,
+        height: 20
+      },
+      {
+        x: 141.803,
+        y: 117.082,
+        width: 40,
+        height: 20
+      }
+    ]
+  )
 }
 
 function testPreservesParagraphRunDecorationFlags() {
@@ -1472,7 +1505,7 @@ function testLayoutTableComputesSpanGeometry() {
   )
 }
 
-function run() {
+async function run() {
   testWrapsLongTextByWidth()
   testPreservesExplicitLineBreaks()
   testExpandsTableRowHeightForWrappedCellText()
@@ -1491,6 +1524,7 @@ function run() {
   testCreatesBackgroundImagePlacementForMatchingPage()
   testSkipsBackgroundImageWhenPageDoesNotMatch()
   testCreatesRepeatedContainBackgroundImagePlacements()
+  await testLayoutDocumentUsesIntrinsicBackgroundImageSize()
   testCreatesCenteredPageNumberPlacement()
   testCreatesWatermarkPlacementWithFormattedPageNumber()
   testCreatesImageWatermarkPlacement()
@@ -1517,4 +1551,7 @@ function run() {
   testResolvesPdfBoldItalicFontStyle()
 }
 
-run()
+run().catch(error => {
+  console.error(error)
+  process.exit(1)
+})

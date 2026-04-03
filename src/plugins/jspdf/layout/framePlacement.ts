@@ -280,17 +280,30 @@ export function createImageWatermarkPlacements(option: {
     ]
   }
 
-  const stepX = option.width + option.gap[0]
-  const stepY = option.height + option.gap[1]
-  const xCount = Math.ceil(option.pageWidth / stepX)
-  const yCount = Math.ceil(option.pageHeight / stepY)
+  const diagonalLength = Math.sqrt(
+    Math.pow(option.width, 2) + Math.pow(option.height, 2)
+  )
+  const patternWidth = diagonalLength + 2 * option.gap[0]
+  const patternHeight = diagonalLength + 2 * option.gap[1]
+  const offsetX = (patternWidth - option.width) / 2
+  const offsetY = (patternHeight - option.height) / 2
+  const xCount = Math.ceil(option.pageWidth / patternWidth)
+  const yCount = Math.ceil(option.pageHeight / patternHeight)
   const placementList: Omit<IPdfRasterBlock, 'pageNo'>[] = []
 
   for (let y = 0; y < yCount; y++) {
     for (let x = 0; x < xCount; x++) {
+      const placementX = x * patternWidth + offsetX
+      const placementY = y * patternHeight + offsetY
+      if (
+        placementX >= option.pageWidth ||
+        placementY >= option.pageHeight
+      ) {
+        continue
+      }
       placementList.push({
-        x: x * stepX,
-        y: y * stepY,
+        x: placementX,
+        y: placementY,
         width: option.width,
         height: option.height,
         dataUrl: option.data,

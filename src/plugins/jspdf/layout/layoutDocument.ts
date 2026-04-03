@@ -23,6 +23,7 @@ import { getBlockHeight } from './layoutBlock'
 import { layoutFrame } from './layoutFrame'
 import { layoutInline } from './layoutInline'
 import { createLabelPlacement } from './labelPlacement'
+import { resolveImageSize } from './imageSize'
 import { createSeparatorVectorLine } from './separatorPlacement'
 import { getTableColumnWidthList, layoutTable } from './layoutTable'
 import { paginateHeights } from './paginate'
@@ -87,13 +88,19 @@ function createPage(pageNo: number, documentModel: IDocumentModel): IPageModel {
 function appendFrameDecorations(
   page: IPageModel,
   documentModel: IDocumentModel,
-  pageCount: number
+  pageCount: number,
+  backgroundImageSize?: {
+    width: number
+    height: number
+  } | null
 ) {
   const backgroundImagePlacements = createBackgroundImagePlacements({
     pageNo: page.pageNo,
     pageWidth: page.width,
     pageHeight: page.height,
     image: documentModel.defaults.backgroundImage,
+    imageWidth: backgroundImageSize?.width,
+    imageHeight: backgroundImageSize?.height,
     size: documentModel.defaults.backgroundSize,
     repeat: documentModel.defaults.backgroundRepeat,
     applyPageNumbers: documentModel.defaults.backgroundApplyPageNumbers
@@ -944,10 +951,19 @@ export async function layoutDocument(
 
   const pageCount = Math.max(1, placementIndexes.length)
   const pageList: IPageModel[] = []
+  const backgroundImageSize =
+    documentModel.defaults.backgroundImage
+      ? await resolveImageSize(documentModel.defaults.backgroundImage)
+      : null
 
   for (let pageNo = 0; pageNo < pageCount; pageNo++) {
     const page = createPage(pageNo, documentModel)
-    appendFrameDecorations(page, documentModel, pageCount)
+    appendFrameDecorations(
+      page,
+      documentModel,
+      pageCount,
+      backgroundImageSize
+    )
     appendStaticZone(
       page,
       documentModel,
