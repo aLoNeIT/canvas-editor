@@ -18,6 +18,12 @@ export interface ICreateBlockTextPlacementsOption {
   fallbackBold?: boolean
   fallbackItalic?: boolean
   fallbackLineHeight?: number
+  fallbackControlPlaceholderColor?: string
+  fallbackControlBracketColor?: string
+  fallbackControlPrefix?: string
+  fallbackControlPostfix?: string
+  fallbackCheckboxGap?: number
+  fallbackRadioGap?: number
   measureWidth: (
     text: string,
     style?: {
@@ -44,7 +50,13 @@ export function createBlockTextPlacementResult(
     color: option.fallbackColor,
     bold: option.fallbackBold,
     italic: option.fallbackItalic,
-    lineHeight: option.fallbackLineHeight
+    lineHeight: option.fallbackLineHeight,
+    controlPlaceholderColor: option.fallbackControlPlaceholderColor,
+    controlBracketColor: option.fallbackControlBracketColor,
+    controlPrefix: option.fallbackControlPrefix,
+    controlPostfix: option.fallbackControlPostfix,
+    checkboxGap: option.fallbackCheckboxGap,
+    radioGap: option.fallbackRadioGap
   })
   if (!runList.length) {
     return {

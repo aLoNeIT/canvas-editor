@@ -8,7 +8,9 @@ import {
 import { VerticalAlign } from '../src/editor/dataset/enum/VerticalAlign.js'
 import { ElementType } from '../src/editor/dataset/enum/Element.js'
 import { NumberType } from '../src/editor/dataset/enum/Common.js'
+import { LineNumberType } from '../src/editor/dataset/enum/LineNumber.js'
 import { RowFlex } from '../src/editor/dataset/enum/Row.js'
+import { BlockType } from '../src/editor/dataset/enum/Block.js'
 import {
   BackgroundRepeat,
   BackgroundSize
@@ -24,8 +26,10 @@ import {
   createBackgroundImagePlacements,
   createImageWatermarkPlacement,
   createImageWatermarkPlacements,
+  createLineNumberPlacements,
   createPageNumberPlacement,
-  createWatermarkPlacement
+  createWatermarkPlacement,
+  createWatermarkPlacements
 } from '../src/plugins/jspdf/layout/framePlacement.js'
 import { createLabelPlacement } from '../src/plugins/jspdf/layout/labelPlacement.js'
 import { createTableCellVisuals } from '../src/plugins/jspdf/layout/tableVisual.js'
@@ -290,6 +294,20 @@ function testResolvesTitleFallbackStyleFromLevel() {
         repeat: false,
         gap: [10, 10],
         numberType: NumberType.ARABIC
+      },
+      pageBorder: {
+        disabled: true,
+        color: '#000000',
+        lineWidth: 1,
+        padding: [0, 5, 0, 5]
+      },
+      lineNumber: {
+        disabled: true,
+        size: 12,
+        font: 'Microsoft YaHei',
+        color: '#000000',
+        right: 20,
+        type: LineNumberType.CONTINUITY
       },
       titleSizeMapping: {
         [TitleLevel.FIRST]: 26,
@@ -703,6 +721,20 @@ async function testLayoutDocumentUsesIntrinsicBackgroundImageSize() {
           gap: [10, 10],
           numberType: NumberType.ARABIC
         },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
         titleSizeMapping: {
           [TitleLevel.FIRST]: 26,
           [TitleLevel.SECOND]: 24,
@@ -775,6 +807,3195 @@ async function testLayoutDocumentUsesIntrinsicBackgroundImageSize() {
   }
 }
 
+async function testLayoutDocumentAppendsPageBorderLines() {
+  const pageList = await layoutDocument({
+    width: 200,
+    height: 300,
+    margins: [20, 30, 40, 50],
+    scale: 1,
+    defaults: {
+      defaultFont: 'Song',
+      defaultSize: 12,
+      defaultColor: '#000000',
+      defaultRowMargin: 1,
+      defaultBasicRowMarginHeight: 8,
+      backgroundColor: '#ffffff',
+      backgroundImage: '',
+      backgroundSize: BackgroundSize.COVER,
+      backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+      backgroundApplyPageNumbers: [],
+      listInheritStyle: false,
+      labelDefaultColor: '#1976d2',
+      labelDefaultBackgroundColor: '#e3f2fd',
+      labelDefaultBorderRadius: 4,
+      labelDefaultPadding: [4, 4, 4, 4],
+      pageNumber: {
+        bottom: 60,
+        size: 12,
+        font: 'Song',
+        color: '#000000',
+        rowFlex: RowFlex.CENTER,
+        format: '{pageNo}',
+        numberType: NumberType.ARABIC,
+        disabled: true,
+        startPageNo: 1,
+        fromPageNo: 0
+      },
+      watermark: {
+        data: '',
+        type: WatermarkType.TEXT,
+        width: 0,
+        height: 0,
+        color: '#cccccc',
+        opacity: 0.3,
+        size: 20,
+        font: 'Song',
+        repeat: false,
+        gap: [10, 10],
+        numberType: NumberType.ARABIC
+      },
+      pageBorder: {
+        disabled: false,
+        color: '#123456',
+        lineWidth: 2,
+        padding: [5, 6, 7, 8]
+      },
+      lineNumber: {
+        disabled: true,
+        size: 12,
+        font: 'Microsoft YaHei',
+        color: '#000000',
+        right: 20,
+        type: LineNumberType.CONTINUITY
+      },
+      titleSizeMapping: {
+        [TitleLevel.FIRST]: 26,
+        [TitleLevel.SECOND]: 24,
+        [TitleLevel.THIRD]: 22,
+        [TitleLevel.FOURTH]: 20,
+        [TitleLevel.FIFTH]: 18,
+        [TitleLevel.SIXTH]: 16
+      }
+    },
+    header: {
+      key: 'header',
+      elementList: [],
+      blockList: [],
+      height: 12
+    },
+    main: {
+      key: 'main',
+      elementList: [],
+      blockList: [],
+      height: 0
+    },
+    footer: {
+      key: 'footer',
+      elementList: [],
+      blockList: [],
+      height: 18
+    }
+  } as any)
+
+  assert.deepEqual(
+    pageList[0].vectorLines.map(({ x1, y1, x2, y2, color, width }) => ({
+      x1,
+      y1,
+      x2,
+      y2,
+      color,
+      width
+    })),
+    [
+      {
+        x1: 42,
+        y1: 27,
+        x2: 176,
+        y2: 27,
+        color: '#123456',
+        width: 2
+      },
+      {
+        x1: 176,
+        y1: 27,
+        x2: 176,
+        y2: 249,
+        color: '#123456',
+        width: 2
+      },
+      {
+        x1: 176,
+        y1: 249,
+        x2: 42,
+        y2: 249,
+        color: '#123456',
+        width: 2
+      },
+      {
+        x1: 42,
+        y1: 249,
+        x2: 42,
+        y2: 27,
+        color: '#123456',
+        width: 2
+      }
+    ]
+  )
+}
+
+async function testLayoutDocumentFallsBackForEmptyControl() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,control-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 100,
+      height: 80,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'control',
+            element: {
+              type: ElementType.CONTROL,
+              value: '',
+              control: {
+                type: 'text',
+                value: null
+              }
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.deepEqual(
+      pageList[0].rasterBlocks.map(
+        ({ x, y, width, height, dataUrl, sourceType }) => ({
+          x,
+          y,
+          width,
+          height,
+          dataUrl,
+          sourceType
+        })
+      ),
+      [
+        {
+          x: 0,
+          y: 0,
+          width: 100,
+          height: 40,
+          dataUrl: 'data:image/png;base64,control-fallback',
+          sourceType: 'control'
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, ['fallback:control'])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRendersControlPlaceholder() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,unexpected-control-placeholder-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 120,
+      height: 80,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        control: {
+          placeholderColor: '#9c9b9b',
+          bracketColor: '#000000',
+          borderWidth: 1,
+          borderColor: '#000000'
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'control',
+            element: {
+              type: ElementType.CONTROL,
+              value: '',
+              control: {
+                type: 'text',
+                value: null,
+                placeholder: '请输入'
+              }
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y, width, height, color }) => ({
+        text,
+        x,
+        y,
+        width,
+        height,
+        color
+      })),
+      [
+        {
+          text: '请输入',
+          x: 0,
+          y: 20,
+          width: 30,
+          height: 20,
+          color: '#9c9b9b'
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRendersDefaultControlPrefixAndPostfix() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,unexpected-control-bracket-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 120,
+      height: 80,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        control: {
+          placeholderColor: '#9c9b9b',
+          bracketColor: '#ff0000',
+          prefix: '{',
+          postfix: '}',
+          borderWidth: 1,
+          borderColor: '#000000'
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'control',
+            element: {
+              type: ElementType.CONTROL,
+              value: '',
+              control: {
+                type: 'text',
+                value: [
+                  {
+                    value: 'abc'
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y, width, height, color }) => ({
+        text,
+        x,
+        y,
+        width,
+        height,
+        color
+      })),
+      [
+        {
+          text: '{',
+          x: 0,
+          y: 20,
+          width: 10,
+          height: 20,
+          color: '#ff0000'
+        },
+        {
+          text: 'abc',
+          x: 10,
+          y: 20,
+          width: 30,
+          height: 20,
+          color: '#000000'
+        },
+        {
+          text: '}',
+          x: 40,
+          y: 20,
+          width: 10,
+          height: 20,
+          color: '#ff0000'
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentFallsBackForHeaderControl() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,header-control-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 100,
+      height: 80,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'control',
+            element: {
+              type: ElementType.CONTROL,
+              value: '',
+              control: {
+                type: 'text',
+                value: null
+              }
+            }
+          }
+        ],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.deepEqual(
+      pageList[0].rasterBlocks.map(
+        ({ x, y, width, height, dataUrl, sourceType }) => ({
+          x,
+          y,
+          width,
+          height,
+          dataUrl,
+          sourceType
+        })
+      ),
+      [
+        {
+          x: 0,
+          y: 0,
+          width: 100,
+          height: 40,
+          dataUrl: 'data:image/png;base64,header-control-fallback',
+          sourceType: 'control'
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, ['fallback:control'])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRendersStandaloneCheckboxAndRadio() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,unexpected-control-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 100,
+      height: 120,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'control',
+            element: {
+              type: ElementType.CHECKBOX,
+              value: '',
+              checkbox: {
+                value: true
+              }
+            }
+          },
+          {
+            kind: 'control',
+            element: {
+              type: ElementType.RADIO,
+              value: '',
+              radio: {
+                value: false
+              }
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y, width, height }) => ({
+        text,
+        x,
+        y,
+        width,
+        height
+      })),
+      [
+        {
+          text: '☑',
+          x: 0,
+          y: 20,
+          width: 10,
+          height: 20
+        },
+        {
+          text: '○',
+          x: 0,
+          y: 60,
+          width: 10,
+          height: 20
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRendersCheckboxAndRadioControlOptions() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,unexpected-control-options-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 120,
+      height: 120,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'control',
+            element: {
+              type: ElementType.CONTROL,
+              value: '',
+              control: {
+                type: 'checkbox',
+                code: 'a',
+                valueSets: [
+                  {
+                    code: 'a',
+                    value: 'A'
+                  },
+                  {
+                    code: 'b',
+                    value: 'B'
+                  }
+                ],
+                value: null
+              }
+            }
+          },
+          {
+            kind: 'control',
+            element: {
+              type: ElementType.CONTROL,
+              value: '',
+              control: {
+                type: 'radio',
+                code: 'b',
+                valueSets: [
+                  {
+                    code: 'a',
+                    value: 'X'
+                  },
+                  {
+                    code: 'b',
+                    value: 'Y'
+                  }
+                ],
+                value: null
+              }
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y, width, height }) => ({
+        text,
+        x,
+        y,
+        width,
+        height
+      })),
+      [
+        {
+          text: '☑',
+          x: 0,
+          y: 20,
+          width: 10,
+          height: 20
+        },
+        {
+          text: 'A',
+          x: 10,
+          y: 20,
+          width: 15,
+          height: 20
+        },
+        {
+          text: '☐',
+          x: 25,
+          y: 20,
+          width: 10,
+          height: 20
+        },
+        {
+          text: 'B',
+          x: 35,
+          y: 20,
+          width: 15,
+          height: 20
+        },
+        {
+          text: '○',
+          x: 0,
+          y: 60,
+          width: 10,
+          height: 20
+        },
+        {
+          text: 'X',
+          x: 10,
+          y: 60,
+          width: 15,
+          height: 20
+        },
+        {
+          text: '◉',
+          x: 25,
+          y: 60,
+          width: 10,
+          height: 20
+        },
+        {
+          text: 'Y',
+          x: 35,
+          y: 60,
+          width: 15,
+          height: 20
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentInheritsCheckboxControlOptionLabelStyles() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,unexpected-checkbox-option-style-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 120,
+      height: 80,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'control',
+            element: {
+              type: ElementType.CONTROL,
+              value: '',
+              control: {
+                type: 'checkbox',
+                code: 'a',
+                valueSets: [
+                  {
+                    code: 'a',
+                    value: 'A'
+                  },
+                  {
+                    code: 'b',
+                    value: 'B'
+                  }
+                ],
+                value: [
+                  {
+                    value: 'AB',
+                    font: 'KaiTi',
+                    size: 16,
+                    color: '#ff0000',
+                    bold: true
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(
+        ({ text, x, y, width, height, font, size, color, bold }) => ({
+          text,
+          x,
+          y,
+          width,
+          height,
+          font,
+          size,
+          color,
+          bold
+        })
+      ),
+      [
+        {
+          text: '☑',
+          x: 0,
+          y: 24,
+          width: 10,
+          height: 20,
+          font: 'Song',
+          size: 12,
+          color: '#000000',
+          bold: false
+        },
+        {
+          text: 'A',
+          x: 10,
+          y: 24,
+          width: 15,
+          height: 20,
+          font: 'KaiTi',
+          size: 16,
+          color: '#ff0000',
+          bold: true
+        },
+        {
+          text: '☐',
+          x: 25,
+          y: 24,
+          width: 10,
+          height: 20,
+          font: 'Song',
+          size: 12,
+          color: '#000000',
+          bold: false
+        },
+        {
+          text: 'B',
+          x: 35,
+          y: 24,
+          width: 15,
+          height: 20,
+          font: 'KaiTi',
+          size: 16,
+          color: '#ff0000',
+          bold: true
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentAppliesCheckboxControlOptionGapSpacing() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,unexpected-checkbox-gap-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 120,
+      height: 80,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'control',
+            element: {
+              type: ElementType.CONTROL,
+              value: '',
+              control: {
+                type: 'checkbox',
+                code: 'a',
+                valueSets: [
+                  {
+                    code: 'a',
+                    value: 'A'
+                  },
+                  {
+                    code: 'b',
+                    value: 'B'
+                  }
+                ],
+                value: null
+              }
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y, width, height }) => ({
+        text,
+        x,
+        y,
+        width,
+        height
+      })),
+      [
+        {
+          text: '☑',
+          x: 0,
+          y: 20,
+          width: 10,
+          height: 20
+        },
+        {
+          text: 'A',
+          x: 10,
+          y: 20,
+          width: 15,
+          height: 20
+        },
+        {
+          text: '☐',
+          x: 25,
+          y: 20,
+          width: 10,
+          height: 20
+        },
+        {
+          text: 'B',
+          x: 35,
+          y: 20,
+          width: 15,
+          height: 20
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRendersTextControlValue() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,unexpected-text-control-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 100,
+      height: 80,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'control',
+            element: {
+              type: ElementType.CONTROL,
+              value: '',
+              control: {
+                type: 'text',
+                value: [
+                  {
+                    value: 'abc'
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y, width, height }) => ({
+        text,
+        x,
+        y,
+        width,
+        height
+      })),
+      [
+        {
+          text: 'abc',
+          x: 0,
+          y: 20,
+          width: 30,
+          height: 20
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentResolvesSelectControlTextFromValueSets() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,unexpected-select-control-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 120,
+      height: 80,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        control: {
+          placeholderColor: '#9c9b9b',
+          bracketColor: '#000000',
+          prefix: '',
+          postfix: '',
+          borderWidth: 1,
+          borderColor: '#000000'
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'control',
+            element: {
+              type: ElementType.CONTROL,
+              value: '',
+              control: {
+                type: 'select',
+                code: 'a,b',
+                valueSets: [
+                  {
+                    code: 'a',
+                    value: 'Alpha'
+                  },
+                  {
+                    code: 'b',
+                    value: 'Beta'
+                  }
+                ],
+                value: null
+              }
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y, width, height }) => ({
+        text,
+        x,
+        y,
+        width,
+        height
+      })),
+      [
+        {
+          text: 'Alpha,Beta',
+          x: 0,
+          y: 20,
+          width: 100,
+          height: 20
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentInheritsTextControlStyles() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,unexpected-text-control-style-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 100,
+      height: 80,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'control',
+            element: {
+              type: ElementType.CONTROL,
+              value: '',
+              control: {
+                type: 'text',
+                font: 'KaiTi',
+                size: 16,
+                bold: true,
+                italic: true,
+                underline: true,
+                strikeout: true,
+                value: [
+                  {
+                    value: 'abc'
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(
+        ({ text, x, y, width, height, font, size, bold, italic }) => ({
+          text,
+          x,
+          y,
+          width,
+          height,
+          font,
+          size,
+          bold,
+          italic
+        })
+      ),
+      [
+        {
+          text: 'abc',
+          x: 0,
+          y: 24,
+          width: 30,
+          height: 20,
+          font: 'KaiTi',
+          size: 16,
+          bold: true,
+          italic: true
+        }
+      ]
+    )
+    assert.deepEqual(
+      pageList[0].vectorLines.map(({ x1, y1, x2, y2, color, width }) => ({
+        x1,
+        y1,
+        x2,
+        y2,
+        color,
+        width
+      })),
+      [
+        {
+          x1: 0,
+          y1: 26,
+          x2: 30,
+          y2: 26,
+          color: '#000000',
+          width: 1
+        },
+        {
+          x1: 0,
+          y1: 18.4,
+          x2: 30,
+          y2: 18.4,
+          color: '#000000',
+          width: 1
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentAppendsTextControlBorder() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,unexpected-text-control-border-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 100,
+      height: 80,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        control: {
+          borderWidth: 2,
+          borderColor: '#123456'
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'control',
+            element: {
+              type: ElementType.CONTROL,
+              value: '',
+              control: {
+                type: 'text',
+                border: true,
+                value: [
+                  {
+                    value: 'abc'
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.deepEqual(
+      pageList[0].vectorLines.map(({ x1, y1, x2, y2, color, width }) => ({
+        x1,
+        y1,
+        x2,
+        y2,
+        color,
+        width
+      })),
+      [
+        {
+          x1: 0,
+          y1: 0,
+          x2: 30,
+          y2: 0,
+          color: '#123456',
+          width: 2
+        },
+        {
+          x1: 30,
+          y1: 0,
+          x2: 30,
+          y2: 40,
+          color: '#123456',
+          width: 2
+        },
+        {
+          x1: 30,
+          y1: 40,
+          x2: 0,
+          y2: 40,
+          color: '#123456',
+          width: 2
+        },
+        {
+          x1: 0,
+          y1: 40,
+          x2: 0,
+          y2: 0,
+          color: '#123456',
+          width: 2
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentMarksLatexAsPending() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,latex-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 100,
+      height: 80,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'latex',
+            element: {
+              type: ElementType.LATEX,
+              value: 'x^2',
+              laTexSVG: '<svg></svg>'
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.deepEqual(pageList[0].issues, ['pending:latex', 'fallback:latex'])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentMarksBlockIframeAndVideoAsPending() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,block-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 100,
+      height: 120,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'block',
+            element: {
+              type: ElementType.BLOCK,
+              value: '',
+              block: {
+                type: BlockType.IFRAME,
+                iframeBlock: {
+                  src: 'https://example.com'
+                }
+              }
+            }
+          },
+          {
+            kind: 'block',
+            element: {
+              type: ElementType.BLOCK,
+              value: '',
+              block: {
+                type: BlockType.VIDEO,
+                videoBlock: {
+                  src: 'https://example.com/video.mp4'
+                }
+              }
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.deepEqual(pageList[0].issues, [
+      'pending:block-iframe',
+      'fallback:block',
+      'pending:block-video',
+      'fallback:block'
+    ])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentAppendsAreaDecorations() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+  const pageList = await layoutDocument({
+    width: 100,
+    height: 80,
+    margins: [0, 10, 0, 10],
+    scale: 1,
+    defaults: {
+      defaultFont: 'Song',
+      defaultSize: 12,
+      defaultColor: '#000000',
+      defaultRowMargin: 1,
+      defaultBasicRowMarginHeight: 8,
+      backgroundColor: '#ffffff',
+      backgroundImage: '',
+      backgroundSize: BackgroundSize.COVER,
+      backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+      backgroundApplyPageNumbers: [],
+      listInheritStyle: false,
+      labelDefaultColor: '#1976d2',
+      labelDefaultBackgroundColor: '#e3f2fd',
+      labelDefaultBorderRadius: 4,
+      labelDefaultPadding: [4, 4, 4, 4],
+      pageNumber: {
+        bottom: 60,
+        size: 12,
+        font: 'Song',
+        color: '#000000',
+        rowFlex: RowFlex.CENTER,
+        format: '{pageNo}',
+        numberType: NumberType.ARABIC,
+        disabled: true,
+        startPageNo: 1,
+        fromPageNo: 0
+      },
+      watermark: {
+        data: '',
+        type: WatermarkType.TEXT,
+        width: 0,
+        height: 0,
+        color: '#cccccc',
+        opacity: 0.3,
+        size: 20,
+        font: 'Song',
+        repeat: false,
+        gap: [10, 10],
+        numberType: NumberType.ARABIC
+      },
+      pageBorder: {
+        disabled: true,
+        color: '#000000',
+        lineWidth: 1,
+        padding: [0, 5, 0, 5]
+      },
+      lineNumber: {
+        disabled: true,
+        size: 12,
+        font: 'Microsoft YaHei',
+        color: '#000000',
+        right: 20,
+        type: LineNumberType.CONTINUITY
+      },
+      titleSizeMapping: {
+        [TitleLevel.FIRST]: 26,
+        [TitleLevel.SECOND]: 24,
+        [TitleLevel.THIRD]: 22,
+        [TitleLevel.FOURTH]: 20,
+        [TitleLevel.FIFTH]: 18,
+        [TitleLevel.SIXTH]: 16
+      }
+    },
+    header: {
+      key: 'header',
+      elementList: [],
+      blockList: [],
+      height: 0
+    },
+    main: {
+      key: 'main',
+      elementList: [],
+      blockList: [
+        {
+          kind: 'paragraph',
+          element: {
+            value: 'ab',
+            areaId: 'area-1',
+            area: {
+              backgroundColor: '#ffeeaa',
+              borderColor: '#cc8800'
+            }
+          }
+        },
+        {
+          kind: 'paragraph',
+          element: {
+            value: 'cd',
+            areaId: 'area-1',
+            area: {
+              backgroundColor: '#ffeeaa',
+              borderColor: '#cc8800'
+            }
+          }
+        }
+      ],
+      height: 0
+    },
+    footer: {
+      key: 'footer',
+      elementList: [],
+      blockList: [],
+      height: 0
+    }
+  } as any)
+
+  assert.deepEqual(pageList[0].highlightRects[1], {
+    pageNo: 0,
+    x: 10,
+    y: 0,
+    width: 80,
+    height: 80,
+    color: '#ffeeaa',
+    opacity: 1
+  })
+  assert.deepEqual(
+    pageList[0].vectorLines.map(({ x1, y1, x2, y2, color, width }) => ({
+      x1,
+      y1,
+      x2,
+      y2,
+      color,
+      width
+    })),
+    [
+      {
+        x1: 10,
+        y1: 0,
+        x2: 90,
+        y2: 0,
+        color: '#cc8800',
+        width: 1
+      },
+      {
+        x1: 90,
+        y1: 0,
+        x2: 90,
+        y2: 80,
+        color: '#cc8800',
+        width: 1
+      },
+      {
+        x1: 90,
+        y1: 80,
+        x2: 10,
+        y2: 80,
+        color: '#cc8800',
+        width: 1
+      },
+      {
+        x1: 10,
+        y1: 80,
+        x2: 10,
+        y2: 0,
+        color: '#cc8800',
+        width: 1
+      }
+    ]
+  )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentAppendsGraffitiStrokes() {
+  const pageList = await layoutDocument({
+    width: 100,
+    height: 80,
+    margins: [0, 0, 0, 0],
+    scale: 1,
+    defaults: {
+      defaultFont: 'Song',
+      defaultSize: 12,
+      defaultColor: '#000000',
+      defaultRowMargin: 1,
+      defaultBasicRowMarginHeight: 8,
+      backgroundColor: '#ffffff',
+      backgroundImage: '',
+      backgroundSize: BackgroundSize.COVER,
+      backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+      backgroundApplyPageNumbers: [],
+      listInheritStyle: false,
+      labelDefaultColor: '#1976d2',
+      labelDefaultBackgroundColor: '#e3f2fd',
+      labelDefaultBorderRadius: 4,
+      labelDefaultPadding: [4, 4, 4, 4],
+      pageNumber: {
+        bottom: 60,
+        size: 12,
+        font: 'Song',
+        color: '#000000',
+        rowFlex: RowFlex.CENTER,
+        format: '{pageNo}',
+        numberType: NumberType.ARABIC,
+        disabled: true,
+        startPageNo: 1,
+        fromPageNo: 0
+      },
+      watermark: {
+        data: '',
+        type: WatermarkType.TEXT,
+        width: 0,
+        height: 0,
+        color: '#cccccc',
+        opacity: 0.3,
+        size: 20,
+        font: 'Song',
+        repeat: false,
+        gap: [10, 10],
+        numberType: NumberType.ARABIC
+      },
+      pageBorder: {
+        disabled: true,
+        color: '#000000',
+        lineWidth: 1,
+        padding: [0, 5, 0, 5]
+      },
+      lineNumber: {
+        disabled: true,
+        size: 12,
+        font: 'Microsoft YaHei',
+        color: '#000000',
+        right: 20,
+        type: LineNumberType.CONTINUITY
+      },
+      graffiti: {
+        defaultLineWidth: 2,
+        defaultLineColor: '#112233'
+      },
+      titleSizeMapping: {
+        [TitleLevel.FIRST]: 26,
+        [TitleLevel.SECOND]: 24,
+        [TitleLevel.THIRD]: 22,
+        [TitleLevel.FOURTH]: 20,
+        [TitleLevel.FIFTH]: 18,
+        [TitleLevel.SIXTH]: 16
+      }
+    },
+    header: {
+      key: 'header',
+      elementList: [],
+      blockList: [],
+      height: 0
+    },
+    main: {
+      key: 'main',
+      elementList: [],
+      blockList: [],
+      height: 0
+    },
+    footer: {
+      key: 'footer',
+      elementList: [],
+      blockList: [],
+      height: 0
+    },
+    graffiti: [
+      {
+        pageNo: 0,
+        strokes: [
+          {
+            points: [10, 20, 30, 40, 50, 60]
+          }
+        ]
+      }
+    ]
+  } as any)
+
+  assert.deepEqual(
+    pageList[0].vectorLines.map(({ x1, y1, x2, y2, color, width }) => ({
+      x1,
+      y1,
+      x2,
+      y2,
+      color,
+      width
+    })),
+    [
+      {
+        x1: 10,
+        y1: 20,
+        x2: 30,
+        y2: 40,
+        color: '#112233',
+        width: 2
+      },
+      {
+        x1: 30,
+        y1: 40,
+        x2: 50,
+        y2: 60,
+        color: '#112233',
+        width: 2
+      }
+    ]
+  )
+  assert.deepEqual(pageList[0].issues, [])
+}
+
 function testCreatesCenteredPageNumberPlacement() {
   const placement = createPageNumberPlacement({
     pageNo: 1,
@@ -806,6 +4027,77 @@ function testCreatesCenteredPageNumberPlacement() {
   })
 }
 
+function testCreatesContinuityLineNumberPlacements() {
+  const placements = createLineNumberPlacements({
+    baselineYList: [40, 60],
+    margins: [20, 30, 20, 50],
+    right: 10,
+    font: 'Song',
+    size: 12,
+    color: '#ff0000',
+    type: LineNumberType.CONTINUITY,
+    startLineNo: 5,
+    measureWidth: createMeasureWidth()
+  })
+
+  assert.deepEqual(placements, [
+    {
+      text: '5',
+      x: 30,
+      y: 40,
+      width: 10,
+      height: 20,
+      font: 'Song',
+      size: 12,
+      color: '#ff0000'
+    },
+    {
+      text: '6',
+      x: 30,
+      y: 60,
+      width: 10,
+      height: 20,
+      font: 'Song',
+      size: 12,
+      color: '#ff0000'
+    }
+  ])
+}
+
+function testCreatesPageScopedLineNumberPlacements() {
+  const placements = createLineNumberPlacements({
+    baselineYList: [40, 60],
+    margins: [20, 30, 20, 50],
+    right: 10,
+    font: 'Song',
+    size: 12,
+    color: '#ff0000',
+    type: LineNumberType.PAGE,
+    startLineNo: 99,
+    measureWidth: createMeasureWidth()
+  })
+
+  assert.deepEqual(
+    placements.map(({ text, x, y }) => ({
+      text,
+      x,
+      y
+    })),
+    [
+      {
+        text: '1',
+        x: 30,
+        y: 40
+      },
+      {
+        text: '2',
+        x: 30,
+        y: 60
+      }
+    ]
+  )
+}
+
 function testCreatesWatermarkPlacementWithFormattedPageNumber() {
   const placement = createWatermarkPlacement({
     pageNo: 1,
@@ -833,6 +4125,69 @@ function testCreatesWatermarkPlacementWithFormattedPageNumber() {
     opacity: 0.3,
     rotate: -45
   })
+}
+
+function testCreatesRepeatedTextWatermarkPlacements() {
+  const placements = createWatermarkPlacements({
+    pageNo: 1,
+    pageCount: 12,
+    pageWidth: 100,
+    pageHeight: 150,
+    data: 'AB {pageNo}',
+    numberType: NumberType.ARABIC,
+    font: 'Song',
+    size: 12,
+    color: '#cccccc',
+    opacity: 0.3,
+    repeat: true,
+    gap: [10, 20],
+    measureWidth: createMeasureWidth()
+  })
+
+  assert.deepEqual(
+    placements.map(({ text, x, y, width, height, rotate }) => ({
+      text,
+      x: roundTo3(x),
+      y: roundTo3(y),
+      width,
+      height,
+      rotate
+    })),
+    [
+      {
+        text: 'AB 2',
+        x: 12.361,
+        y: 42.361,
+        width: 40,
+        height: 20,
+        rotate: -45
+      },
+      {
+        text: 'AB 2',
+        x: 77.082,
+        y: 42.361,
+        width: 40,
+        height: 20,
+        rotate: -45
+      },
+      {
+        text: 'AB 2',
+        x: 12.361,
+        y: 127.082,
+        width: 40,
+        height: 20,
+        rotate: -45
+      },
+      {
+        text: 'AB 2',
+        x: 77.082,
+        y: 127.082,
+        width: 40,
+        height: 20,
+        rotate: -45
+      }
+    ]
+  )
 }
 
 function testCreatesImageWatermarkPlacement() {
@@ -1525,8 +4880,28 @@ async function run() {
   testSkipsBackgroundImageWhenPageDoesNotMatch()
   testCreatesRepeatedContainBackgroundImagePlacements()
   await testLayoutDocumentUsesIntrinsicBackgroundImageSize()
+  await testLayoutDocumentAppendsPageBorderLines()
+  await testLayoutDocumentFallsBackForEmptyControl()
+  await testLayoutDocumentRendersControlPlaceholder()
+  await testLayoutDocumentRendersDefaultControlPrefixAndPostfix()
+  await testLayoutDocumentFallsBackForHeaderControl()
+  await testLayoutDocumentRendersStandaloneCheckboxAndRadio()
+  await testLayoutDocumentRendersCheckboxAndRadioControlOptions()
+  await testLayoutDocumentInheritsCheckboxControlOptionLabelStyles()
+  await testLayoutDocumentAppliesCheckboxControlOptionGapSpacing()
+  await testLayoutDocumentRendersTextControlValue()
+  await testLayoutDocumentResolvesSelectControlTextFromValueSets()
+  await testLayoutDocumentInheritsTextControlStyles()
+  await testLayoutDocumentAppendsTextControlBorder()
+  await testLayoutDocumentMarksLatexAsPending()
+  await testLayoutDocumentMarksBlockIframeAndVideoAsPending()
+  await testLayoutDocumentAppendsAreaDecorations()
+  await testLayoutDocumentAppendsGraffitiStrokes()
   testCreatesCenteredPageNumberPlacement()
+  testCreatesContinuityLineNumberPlacements()
+  testCreatesPageScopedLineNumberPlacements()
   testCreatesWatermarkPlacementWithFormattedPageNumber()
+  testCreatesRepeatedTextWatermarkPlacements()
   testCreatesImageWatermarkPlacement()
   testCreatesRepeatedImageWatermarkPlacements()
   testCreatesSeparateParagraphPlacementsForMultipleRuns()

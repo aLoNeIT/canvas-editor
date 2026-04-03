@@ -1,6 +1,7 @@
 import type { IJspdfSourceState } from '../source/readEditorState'
 import type {
   IDocumentBlockNode,
+  IDocumentGraffitiPage,
   IDocumentModel,
   IZoneModel
 } from '../model/document'
@@ -40,6 +41,20 @@ function createZone(
     blockList,
     height: blockList.length * 24
   }
+}
+
+function createGraffitiList(source: IJspdfSourceState): IDocumentGraffitiPage[] {
+  const defaultLineWidth = source.options.graffiti.defaultLineWidth
+  const defaultLineColor = source.options.graffiti.defaultLineColor
+
+  return (source.result.data.graffiti || []).map(page => ({
+    pageNo: page.pageNo,
+    strokes: (page.strokes || []).map(stroke => ({
+      lineWidth: stroke.lineWidth || defaultLineWidth,
+      lineColor: stroke.lineColor || defaultLineColor,
+      points: [...stroke.points]
+    }))
+  }))
 }
 
 export function normalizeDocument(source: IJspdfSourceState): IDocumentModel {
@@ -92,6 +107,38 @@ export function normalizeDocument(source: IJspdfSourceState): IDocumentModel {
         gap: [...source.options.watermark.gap],
         numberType: source.options.watermark.numberType
       },
+      pageBorder: {
+        disabled: source.options.pageBorder.disabled,
+        color: source.options.pageBorder.color,
+        lineWidth: source.options.pageBorder.lineWidth,
+        padding: [...source.options.pageBorder.padding]
+      },
+      lineNumber: {
+        disabled: source.options.lineNumber.disabled,
+        size: source.options.lineNumber.size,
+        font: source.options.lineNumber.font,
+        color: source.options.lineNumber.color,
+        right: source.options.lineNumber.right,
+        type: source.options.lineNumber.type
+      },
+      checkbox: {
+        gap: source.options.checkbox.gap
+      },
+      radio: {
+        gap: source.options.radio.gap
+      },
+      control: {
+        placeholderColor: source.options.control.placeholderColor,
+        bracketColor: source.options.control.bracketColor,
+        prefix: source.options.control.prefix,
+        postfix: source.options.control.postfix,
+        borderWidth: source.options.control.borderWidth,
+        borderColor: source.options.control.borderColor
+      },
+      graffiti: {
+        defaultLineWidth: source.options.graffiti.defaultLineWidth,
+        defaultLineColor: source.options.graffiti.defaultLineColor
+      },
       titleSizeMapping: {
         [TitleLevel.FIRST]: source.options.title.defaultFirstSize,
         [TitleLevel.SECOND]: source.options.title.defaultSecondSize,
@@ -103,6 +150,7 @@ export function normalizeDocument(source: IJspdfSourceState): IDocumentModel {
     },
     header: createZone('header', data.header || []),
     main: createZone('main', data.main || []),
-    footer: createZone('footer', data.footer || [])
+    footer: createZone('footer', data.footer || []),
+    graffiti: createGraffitiList(source)
   }
 }

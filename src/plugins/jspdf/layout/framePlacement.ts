@@ -3,10 +3,12 @@ import {
   BackgroundSize
 } from '../../../editor/dataset/enum/Background'
 import { NumberType } from '../../../editor/dataset/enum/Common'
+import { LineNumberType } from '../../../editor/dataset/enum/LineNumber'
 import { RowFlex } from '../../../editor/dataset/enum/Row'
 import { WatermarkType } from '../../../editor/dataset/enum/Watermark'
 import type { IPdfHighlightRect, IPdfTextRun } from '../types'
 import type { IPdfRasterBlock } from '../types'
+import type { IPdfVectorLine } from '../types'
 
 function convertNumberToChinese(num: number) {
   const chineseNum = [
@@ -74,6 +76,53 @@ export function createBackgroundRect(option: {
     color: option.color,
     opacity: 1
   }
+}
+
+export function createPageBorderLines(option: {
+  x: number
+  y: number
+  width: number
+  height: number
+  color: string
+  lineWidth: number
+}): Omit<IPdfVectorLine, 'pageNo'>[] {
+  const right = option.x + option.width
+  const bottom = option.y + option.height
+
+  return [
+    {
+      x1: option.x,
+      y1: option.y,
+      x2: right,
+      y2: option.y,
+      color: option.color,
+      width: option.lineWidth
+    },
+    {
+      x1: right,
+      y1: option.y,
+      x2: right,
+      y2: bottom,
+      color: option.color,
+      width: option.lineWidth
+    },
+    {
+      x1: right,
+      y1: bottom,
+      x2: option.x,
+      y2: bottom,
+      color: option.color,
+      width: option.lineWidth
+    },
+    {
+      x1: option.x,
+      y1: bottom,
+      x2: option.x,
+      y2: option.y,
+      color: option.color,
+      width: option.lineWidth
+    }
+  ]
 }
 
 export function createBackgroundImagePlacement(option: {
@@ -195,6 +244,38 @@ export function createPageNumberPlacement(option: {
   }
 }
 
+export function createLineNumberPlacements(option: {
+  baselineYList: number[]
+  margins: number[]
+  right: number
+  font: string
+  size: number
+  color: string
+  type: LineNumberType
+  startLineNo: number
+  measureWidth: (text: string) => number
+}): Omit<IPdfTextRun, 'pageNo'>[] {
+  return option.baselineYList.map((baselineY, index) => {
+    const seq =
+      option.type === LineNumberType.PAGE
+        ? index + 1
+        : option.startLineNo + index
+    const text = `${seq}`
+    const width = option.measureWidth(text)
+
+    return {
+      text,
+      x: option.margins[3] - width - option.right,
+      y: baselineY,
+      width,
+      height: option.size + 8,
+      font: option.font,
+      size: option.size,
+      color: option.color
+    }
+  })
+}
+
 export function createWatermarkPlacement(option: {
   pageNo: number
   pageCount: number
@@ -208,8 +289,30 @@ export function createWatermarkPlacement(option: {
   opacity: number
   measureWidth: (text: string) => number
 }): Omit<IPdfTextRun, 'pageNo'> | null {
+  return createWatermarkPlacements({
+    ...option,
+    repeat: false,
+    gap: [0, 0]
+  })[0] || null
+}
+
+export function createWatermarkPlacements(option: {
+  pageNo: number
+  pageCount: number
+  pageWidth: number
+  pageHeight: number
+  data: string
+  numberType: NumberType
+  font: string
+  size: number
+  color: string
+  opacity: number
+  repeat: boolean
+  gap: [number, number]
+  measureWidth: (text: string) => number
+}): Omit<IPdfTextRun, 'pageNo'>[] {
   if (!option.data) {
-    return null
+    return []
   }
 
   const text = replacePagePlaceholders(
@@ -219,19 +322,60 @@ export function createWatermarkPlacement(option: {
     option.numberType
   )
   const width = option.measureWidth(text)
+  const height = option.size + 8
 
-  return {
-    text,
-    x: (option.pageWidth - width) / 2,
-    y: option.pageHeight / 2,
-    width,
-    height: option.size + 8,
-    font: option.font,
-    size: option.size,
-    color: option.color,
-    opacity: option.opacity,
-    rotate: -45
+  if (!option.repeat) {
+    return [
+      {
+        text,
+        x: (option.pageWidth - width) / 2,
+        y: option.pageHeight / 2,
+        width,
+        height,
+        font: option.font,
+        size: option.size,
+        color: option.color,
+        opacity: option.opacity,
+        rotate: -45
+      }
+    ]
   }
+
+  const diagonalLength = Math.sqrt(Math.pow(width, 2) + Math.pow(height, 2))
+  const patternWidth = diagonalLength + 2 * option.gap[0]
+  const patternHeight = diagonalLength + 2 * option.gap[1]
+  const offsetX = (patternWidth - width) / 2
+  const baselineY = patternHeight / 2
+  const xCount = Math.ceil(option.pageWidth / patternWidth)
+  const yCount = Math.ceil(option.pageHeight / patternHeight)
+  const placementList: Omit<IPdfTextRun, 'pageNo'>[] = []
+
+  for (let y = 0; y < yCount; y++) {
+    for (let x = 0; x < xCount; x++) {
+      const placementX = x * patternWidth + offsetX
+      const placementY = y * patternHeight + baselineY
+      if (
+        placementX >= option.pageWidth ||
+        placementY >= option.pageHeight
+      ) {
+        continue
+      }
+      placementList.push({
+        text,
+        x: placementX,
+        y: placementY,
+        width,
+        height,
+        font: option.font,
+        size: option.size,
+        color: option.color,
+        opacity: option.opacity,
+        rotate: -45
+      })
+    }
+  }
+
+  return placementList
 }
 
 export function createImageWatermarkPlacement(option: {

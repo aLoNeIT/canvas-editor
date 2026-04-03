@@ -5,6 +5,7 @@ export interface IStyledTextRun {
   font: string
   size: number
   baselineShift?: number
+  letterSpacing?: number
   bold?: boolean
   italic?: boolean
   underline?: boolean
@@ -61,6 +62,7 @@ function isSameStyle(
     left.font === right.font &&
     left.size === right.size &&
     left.baselineShift === right.baselineShift &&
+    left.letterSpacing === right.letterSpacing &&
     left.bold === right.bold &&
     left.italic === right.italic &&
     left.underline === right.underline &&
@@ -154,7 +156,7 @@ export function createStyledTextRunPlacements(
         size: run.size,
         bold: run.bold,
         italic: run.italic
-      })
+      }) + (run.letterSpacing || 0)
 
       if (
         currentLine.segmentList.length &&
@@ -171,6 +173,7 @@ export function createStyledTextRunPlacements(
           font: run.font,
           size: run.size,
           baselineShift: run.baselineShift,
+          letterSpacing: run.letterSpacing,
           bold: run.bold,
           italic: run.italic,
           underline: run.underline,
@@ -204,6 +207,7 @@ export function createStyledTextRunPlacements(
         font: segment.font,
         size: segment.size,
         baselineShift: segment.baselineShift,
+        letterSpacing: segment.letterSpacing,
         bold: segment.bold,
         italic: segment.italic,
         underline: segment.underline,

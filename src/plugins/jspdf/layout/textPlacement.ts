@@ -23,6 +23,7 @@ export interface ITextPlacement {
   font: string
   size: number
   baselineShift?: number
+  letterSpacing?: number
   bold?: boolean
   italic?: boolean
   underline?: boolean

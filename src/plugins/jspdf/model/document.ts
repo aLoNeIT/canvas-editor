@@ -4,9 +4,21 @@ import type {
   BackgroundSize
 } from '../../../editor/dataset/enum/Background'
 import type { NumberType } from '../../../editor/dataset/enum/Common'
+import type { LineNumberType } from '../../../editor/dataset/enum/LineNumber'
 import type { RowFlex } from '../../../editor/dataset/enum/Row'
 import type { TitleLevel } from '../../../editor/dataset/enum/Title'
 import type { WatermarkType } from '../../../editor/dataset/enum/Watermark'
+
+export interface IDocumentGraffitiStroke {
+  lineWidth: number
+  lineColor: string
+  points: number[]
+}
+
+export interface IDocumentGraffitiPage {
+  pageNo: number
+  strokes: IDocumentGraffitiStroke[]
+}
 
 export interface IDocumentInlineNode {
   kind: 'text'
@@ -15,6 +27,7 @@ export interface IDocumentInlineNode {
   size: number
   bold?: boolean
   italic?: boolean
+  letterSpacing?: number
   color?: string
 }
 
@@ -89,6 +102,38 @@ export interface IDocumentLayoutDefaults {
     gap: number[]
     numberType: NumberType
   }
+  pageBorder: {
+    disabled: boolean
+    color: string
+    lineWidth: number
+    padding: number[]
+  }
+  lineNumber: {
+    disabled: boolean
+    size: number
+    font: string
+    color: string
+    right: number
+    type: LineNumberType
+  }
+  checkbox?: {
+    gap: number
+  }
+  radio?: {
+    gap: number
+  }
+  control?: {
+    placeholderColor: string
+    bracketColor: string
+    prefix: string
+    postfix: string
+    borderWidth: number
+    borderColor: string
+  }
+  graffiti?: {
+    defaultLineWidth: number
+    defaultLineColor: string
+  }
   titleSizeMapping: Record<TitleLevel, number>
 }
 
@@ -101,4 +146,5 @@ export interface IDocumentModel {
   header: IZoneModel
   main: IZoneModel
   footer: IZoneModel
+  graffiti?: IDocumentGraffitiPage[]
 }
