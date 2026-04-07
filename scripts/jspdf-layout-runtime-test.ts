@@ -7,10 +7,11 @@ import {
 } from '../src/editor/dataset/enum/table/Table.js'
 import { VerticalAlign } from '../src/editor/dataset/enum/VerticalAlign.js'
 import { ElementType } from '../src/editor/dataset/enum/Element.js'
-import { NumberType } from '../src/editor/dataset/enum/Common.js'
+import { ImageDisplay, NumberType } from '../src/editor/dataset/enum/Common.js'
 import { LineNumberType } from '../src/editor/dataset/enum/LineNumber.js'
 import { RowFlex } from '../src/editor/dataset/enum/Row.js'
 import { BlockType } from '../src/editor/dataset/enum/Block.js'
+import { ControlType } from '../src/editor/dataset/enum/Control.js'
 import {
   BackgroundRepeat,
   BackgroundSize
@@ -40,13 +41,22 @@ import {
   resolveTableRowHeightList
 } from '../src/plugins/jspdf/layout/tableMetrics.js'
 import { layoutDocument } from '../src/plugins/jspdf/layout/layoutDocument.js'
+import { normalizeDocument } from '../src/plugins/jspdf/normalize/normalizeDocument.js'
 import {
   resolveBlockTextStyle,
   resolveListBlockSemantics
 } from '../src/plugins/jspdf/layout/blockSemantics.js'
 import { resolvePdfTextFontStyle } from '../src/plugins/jspdf/render/fontStyle.js'
+import { renderImages } from '../src/plugins/jspdf/render/renderImage.js'
+import { partitionRasterBlocksByLayer } from '../src/plugins/jspdf/render/renderImage.js'
+import { collectPageRenderOperations } from '../src/plugins/jspdf/render/renderStage.js'
+import { renderTextRuns } from '../src/plugins/jspdf/render/renderText.js'
 import { createTextPlacements } from '../src/plugins/jspdf/layout/textPlacement.js'
 import { wrapText } from '../src/plugins/jspdf/layout/wrapText.js'
+import {
+  getBadgeStateSnapshot,
+  installBadgeStateTracking
+} from '../src/plugins/jspdf/source/badgeState.js'
 import { ListStyle, ListType } from '../src/editor/dataset/enum/List.js'
 import { TitleLevel } from '../src/editor/dataset/enum/Title.js'
 
@@ -87,6 +97,112 @@ function createTd(text: string, colspan = 1, rowspan = 1): ITd {
         value: text
       }
     ]
+  }
+}
+
+function createRuntimeSourceOptions() {
+  return {
+    width: 120,
+    height: 100,
+    margins: [0, 10, 0, 10],
+    scale: 1,
+    defaultFont: 'Song',
+    defaultSize: 12,
+    defaultTabWidth: 32,
+    defaultColor: '#000000',
+    defaultRowMargin: 1,
+    defaultBasicRowMarginHeight: 8,
+    background: {
+      color: '#ffffff',
+      image: '',
+      size: BackgroundSize.COVER,
+      repeat: BackgroundRepeat.NO_REPEAT,
+      applyPageNumbers: []
+    },
+    list: {
+      inheritStyle: false
+    },
+    label: {
+      defaultColor: '#1976d2',
+      defaultBackgroundColor: '#e3f2fd',
+      defaultBorderRadius: 4,
+      defaultPadding: [4, 4, 4, 4]
+    },
+    imgCaption: {
+      color: '#666666',
+      font: 'Microsoft YaHei',
+      size: 12,
+      top: 5
+    },
+    pageNumber: {
+      bottom: 60,
+      size: 12,
+      font: 'Song',
+      color: '#000000',
+      rowFlex: RowFlex.CENTER,
+      format: '{pageNo}',
+      numberType: NumberType.ARABIC,
+      disabled: true,
+      startPageNo: 1,
+      fromPageNo: 0
+    },
+    watermark: {
+      data: '',
+      type: WatermarkType.TEXT,
+      width: 0,
+      height: 0,
+      color: '#cccccc',
+      opacity: 0.3,
+      size: 20,
+      font: 'Song',
+      repeat: false,
+      gap: [10, 10],
+      numberType: NumberType.ARABIC
+    },
+    pageBorder: {
+      disabled: true,
+      color: '#000000',
+      lineWidth: 1,
+      padding: [0, 5, 0, 5]
+    },
+    lineNumber: {
+      disabled: true,
+      size: 12,
+      font: 'Microsoft YaHei',
+      color: '#000000',
+      right: 20,
+      type: LineNumberType.CONTINUITY
+    },
+    badge: {
+      top: 0,
+      left: 5
+    },
+    checkbox: {
+      gap: 5
+    },
+    radio: {
+      gap: 5
+    },
+    control: {
+      placeholderColor: '#999999',
+      bracketColor: '#666666',
+      prefix: '[',
+      postfix: ']',
+      borderWidth: 1,
+      borderColor: '#409eff'
+    },
+    graffiti: {
+      defaultLineWidth: 2,
+      defaultLineColor: '#112233'
+    },
+    title: {
+      defaultFirstSize: 26,
+      defaultSecondSize: 24,
+      defaultThirdSize: 22,
+      defaultFourthSize: 20,
+      defaultFifthSize: 18,
+      defaultSixthSize: 16
+    }
   }
 }
 
@@ -166,6 +282,185 @@ function testDistributesRowspanExtraHeightToSpanTailRow() {
   })
 
   assert.deepEqual(rowHeightList, [24, 44])
+}
+
+function testNormalizeDocumentSkipsHiddenElements() {
+  const documentModel = normalizeDocument({
+    result: {
+      data: {
+        header: [],
+        main: [
+          {
+            value: 'a'
+          },
+          {
+            value: 'b',
+            hide: true
+          },
+          {
+            type: ElementType.CONTROL,
+            value: '',
+            control: {
+              type: ControlType.TEXT,
+              value: [
+                {
+                  value: 'c'
+                }
+              ],
+              hide: true
+            }
+          },
+          {
+            type: ElementType.AREA,
+            value: '',
+            area: {
+              hide: true
+            },
+            valueList: [
+              {
+                value: 'd'
+              }
+            ]
+          },
+          {
+            type: ElementType.TITLE,
+            value: '',
+            level: TitleLevel.FIRST,
+            valueList: [
+              {
+                value: 'e',
+                hide: true
+              },
+              {
+                value: 'f'
+              }
+            ]
+          }
+        ],
+        footer: [],
+        graffiti: []
+      }
+    },
+    options: createRuntimeSourceOptions()
+  } as any)
+
+  assert.deepEqual(
+    documentModel.main.blockList.map(block => ({
+      type: block.element.type,
+      value: block.element.value,
+      childText: (block.element.valueList || []).map(element => element.value).join('')
+    })),
+    [
+      {
+        type: undefined,
+        value: 'a',
+        childText: ''
+      },
+      {
+        type: ElementType.TITLE,
+        value: '',
+        childText: 'f'
+      }
+    ]
+  )
+}
+
+function testTracksBadgeStateViaWrappedCommands() {
+  const mainCallList: unknown[] = []
+  const areaCallList: unknown[] = []
+  const editor = {
+    command: {
+      executeSetMainBadge(payload: unknown) {
+        mainCallList.push(payload)
+      },
+      executeSetAreaBadge(payload: unknown) {
+        areaCallList.push(payload)
+      }
+    }
+  }
+  const mainBadge = {
+    width: 40,
+    height: 20,
+    value: 'data:image/png;base64,main'
+  }
+  const areaBadgeList = [
+    {
+      areaId: 'area-1',
+      badge: {
+        left: 8,
+        top: 6,
+        width: 30,
+        height: 12,
+        value: 'data:image/png;base64,area'
+      }
+    }
+  ]
+
+  installBadgeStateTracking(editor as any)
+  editor.command.executeSetMainBadge(mainBadge)
+  editor.command.executeSetAreaBadge(areaBadgeList)
+
+  assert.deepEqual(mainCallList, [mainBadge])
+  assert.deepEqual(areaCallList, [areaBadgeList])
+  assert.deepEqual(getBadgeStateSnapshot(editor as any), {
+    main: mainBadge,
+    areas: areaBadgeList
+  })
+}
+
+function testNormalizeDocumentCopiesBadgeState() {
+  const documentModel = normalizeDocument({
+    result: {
+      data: {
+        header: [],
+        main: [],
+        footer: [],
+        graffiti: []
+      }
+    },
+    options: createRuntimeSourceOptions(),
+    badge: {
+      main: {
+        width: 40,
+        height: 20,
+        value: 'data:image/png;base64,main'
+      },
+      areas: [
+        {
+          areaId: 'area-1',
+          badge: {
+            left: 8,
+            top: 6,
+            width: 30,
+            height: 12,
+            value: 'data:image/png;base64,area'
+          }
+        }
+      ]
+    }
+  } as any)
+
+  assert.deepEqual(documentModel.badge, {
+    top: 0,
+    left: 5,
+    main: {
+      width: 40,
+      height: 20,
+      value: 'data:image/png;base64,main'
+    },
+    areas: [
+      {
+        areaId: 'area-1',
+        badge: {
+          left: 8,
+          top: 6,
+          width: 30,
+          height: 12,
+          value: 'data:image/png;base64,area'
+        }
+      }
+    ]
+  })
 }
 
 function testCreatesPerLineTextPlacements() {
@@ -270,6 +565,12 @@ function testResolvesTitleFallbackStyleFromLevel() {
       labelDefaultBackgroundColor: '#e3f2fd',
       labelDefaultBorderRadius: 4,
       labelDefaultPadding: [4, 4, 4, 4],
+      imgCaption: {
+        color: '#666666',
+        font: 'Microsoft YaHei',
+        size: 12,
+        top: 5
+      },
       pageNumber: {
         bottom: 60,
         size: 12,
@@ -383,6 +684,209 @@ function testOffsetsParagraphPlacementsByResolvedListIndent() {
         text: 'ab',
         x: 50,
         y: 32
+      }
+    ]
+  )
+}
+
+function testCentersParagraphPlacementsByRowFlex() {
+  const placementList = createBlockTextPlacements({
+    element: {
+      value: 'ab',
+      rowFlex: RowFlex.CENTER
+    },
+    x: 10,
+    y: 20,
+    width: 80,
+    fallbackFont: 'Song',
+    fallbackSize: 12,
+    fallbackColor: '#000000',
+    measureWidth: createMeasureWidth()
+  } as any)
+
+  assert.deepEqual(
+    placementList.map(({ text, x, y }) => ({
+      text,
+      x,
+      y
+    })),
+    [
+      {
+        text: 'ab',
+        x: 40,
+        y: 32
+      }
+    ]
+  )
+}
+
+function testRightAlignsParagraphPlacementsByRowFlex() {
+  const placementList = createBlockTextPlacements({
+    element: {
+      value: 'ab',
+      rowFlex: RowFlex.RIGHT
+    },
+    x: 10,
+    y: 20,
+    width: 80,
+    fallbackFont: 'Song',
+    fallbackSize: 12,
+    fallbackColor: '#000000',
+    measureWidth: createMeasureWidth()
+  } as any)
+
+  assert.deepEqual(
+    placementList.map(({ text, x, y }) => ({
+      text,
+      x,
+      y
+    })),
+    [
+      {
+        text: 'ab',
+        x: 70,
+        y: 32
+      }
+    ]
+  )
+}
+
+function testJustifiesParagraphPlacementsByRowFlex() {
+  const placementList = createBlockTextPlacements({
+    element: {
+      value: 'ab',
+      rowFlex: RowFlex.JUSTIFY
+    },
+    x: 10,
+    y: 20,
+    width: 80,
+    fallbackFont: 'Song',
+    fallbackSize: 12,
+    fallbackColor: '#000000',
+    measureWidth: createMeasureWidth()
+  } as any)
+
+  assert.deepEqual(
+    placementList.map(({ text, x, y, width }) => ({
+      text,
+      x,
+      y,
+      width
+    })),
+    [
+      {
+        text: 'a',
+        x: 10,
+        y: 32,
+        width: 70
+      },
+      {
+        text: 'b',
+        x: 80,
+        y: 32,
+        width: 10
+      }
+    ]
+  )
+}
+
+function testAlignsWrappedParagraphPlacementsByRowFlex() {
+  const placementList = createBlockTextPlacements({
+    element: {
+      value: 'abc',
+      rowFlex: RowFlex.ALIGNMENT
+    },
+    x: 10,
+    y: 20,
+    width: 25,
+    fallbackFont: 'Song',
+    fallbackSize: 12,
+    fallbackColor: '#000000',
+    measureWidth: createMeasureWidth()
+  } as any)
+
+  assert.deepEqual(
+    placementList.map(({ text, x, y, width }) => ({
+      text,
+      x,
+      y,
+      width
+    })),
+    [
+      {
+        text: 'a',
+        x: 10,
+        y: 32,
+        width: 15
+      },
+      {
+        text: 'b',
+        x: 25,
+        y: 32,
+        width: 10
+      },
+      {
+        text: 'c',
+        x: 10,
+        y: 52,
+        width: 10
+      }
+    ]
+  )
+}
+
+function testReservesTabWidthInParagraphPlacements() {
+  const placementList = createBlockTextPlacements({
+    element: {
+      value: '',
+      valueList: [
+        {
+          value: 'a'
+        },
+        {
+          type: ElementType.TAB,
+          value: ''
+        },
+        {
+          value: 'b'
+        }
+      ]
+    },
+    x: 10,
+    y: 20,
+    width: 120,
+    fallbackFont: 'Song',
+    fallbackSize: 12,
+    fallbackColor: '#000000',
+    fallbackTabWidth: 40,
+    measureWidth: createMeasureWidth()
+  } as any)
+
+  assert.deepEqual(
+    placementList.map(({ text, x, y, width }) => ({
+      text,
+      x,
+      y,
+      width
+    })),
+    [
+      {
+        text: 'a',
+        x: 10,
+        y: 32,
+        width: 10
+      },
+      {
+        text: ' ',
+        x: 20,
+        y: 32,
+        width: 40
+      },
+      {
+        text: 'b',
+        x: 60,
+        y: 32,
+        width: 10
       }
     ]
   )
@@ -696,6 +1200,12 @@ async function testLayoutDocumentUsesIntrinsicBackgroundImageSize() {
         labelDefaultBackgroundColor: '#e3f2fd',
         labelDefaultBorderRadius: 4,
         labelDefaultPadding: [4, 4, 4, 4],
+        imgCaption: {
+          color: '#666666',
+          font: 'Microsoft YaHei',
+          size: 12,
+          top: 5
+        },
         pageNumber: {
           bottom: 60,
           size: 12,
@@ -1090,29 +1600,8 @@ async function testLayoutDocumentFallsBackForEmptyControl() {
       }
     } as any)
 
-    assert.deepEqual(
-      pageList[0].rasterBlocks.map(
-        ({ x, y, width, height, dataUrl, sourceType }) => ({
-          x,
-          y,
-          width,
-          height,
-          dataUrl,
-          sourceType
-        })
-      ),
-      [
-        {
-          x: 0,
-          y: 0,
-          width: 100,
-          height: 40,
-          dataUrl: 'data:image/png;base64,control-fallback',
-          sourceType: 'control'
-        }
-      ]
-    )
-    assert.deepEqual(pageList[0].issues, ['fallback:control'])
+    assert.deepEqual(pageList[0].rasterBlocks, [])
+    assert.deepEqual(pageList[0].issues, [])
   } finally {
     runtimeGlobal.document = previousDocument
   }
@@ -1646,29 +2135,8 @@ async function testLayoutDocumentFallsBackForHeaderControl() {
       }
     } as any)
 
-    assert.deepEqual(
-      pageList[0].rasterBlocks.map(
-        ({ x, y, width, height, dataUrl, sourceType }) => ({
-          x,
-          y,
-          width,
-          height,
-          dataUrl,
-          sourceType
-        })
-      ),
-      [
-        {
-          x: 0,
-          y: 0,
-          width: 100,
-          height: 40,
-          dataUrl: 'data:image/png;base64,header-control-fallback',
-          sourceType: 'control'
-        }
-      ]
-    )
-    assert.deepEqual(pageList[0].issues, ['fallback:control'])
+    assert.deepEqual(pageList[0].rasterBlocks, [])
+    assert.deepEqual(pageList[0].issues, [])
   } finally {
     runtimeGlobal.document = previousDocument
   }
@@ -3805,6 +4273,7 @@ async function testLayoutDocumentAppendsAreaDecorations() {
 
   assert.deepEqual(pageList[0].highlightRects[1], {
     pageNo: 0,
+    stage: 0,
     x: 10,
     y: 0,
     width: 80,
@@ -3859,6 +4328,167 @@ async function testLayoutDocumentAppendsAreaDecorations() {
   } finally {
     runtimeGlobal.document = previousDocument
   }
+}
+
+async function testLayoutDocumentAppendsMainAndAreaBadges() {
+  const pageList = await layoutDocument({
+    width: 100,
+    height: 80,
+    margins: [0, 0, 0, 0],
+    scale: 1,
+    defaults: {
+      defaultFont: 'Song',
+      defaultSize: 12,
+      defaultColor: '#000000',
+      defaultRowMargin: 1,
+      defaultBasicRowMarginHeight: 8,
+      backgroundColor: '#ffffff',
+      backgroundImage: '',
+      backgroundSize: BackgroundSize.COVER,
+      backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+      backgroundApplyPageNumbers: [],
+      listInheritStyle: false,
+      labelDefaultColor: '#1976d2',
+      labelDefaultBackgroundColor: '#e3f2fd',
+      labelDefaultBorderRadius: 4,
+      labelDefaultPadding: [4, 4, 4, 4],
+      pageNumber: {
+        bottom: 60,
+        size: 12,
+        font: 'Song',
+        color: '#000000',
+        rowFlex: RowFlex.CENTER,
+        format: '{pageNo}',
+        numberType: NumberType.ARABIC,
+        disabled: true,
+        startPageNo: 1,
+        fromPageNo: 0
+      },
+      watermark: {
+        data: '',
+        type: WatermarkType.TEXT,
+        width: 0,
+        height: 0,
+        color: '#cccccc',
+        opacity: 0.3,
+        size: 20,
+        font: 'Song',
+        repeat: false,
+        gap: [10, 10],
+        numberType: NumberType.ARABIC
+      },
+      pageBorder: {
+        disabled: true,
+        color: '#000000',
+        lineWidth: 1,
+        padding: [0, 5, 0, 5]
+      },
+      lineNumber: {
+        disabled: true,
+        size: 12,
+        font: 'Microsoft YaHei',
+        color: '#000000',
+        right: 20,
+        type: LineNumberType.CONTINUITY
+      },
+      graffiti: {
+        defaultLineWidth: 2,
+        defaultLineColor: '#112233'
+      },
+      titleSizeMapping: {
+        [TitleLevel.FIRST]: 26,
+        [TitleLevel.SECOND]: 24,
+        [TitleLevel.THIRD]: 22,
+        [TitleLevel.FOURTH]: 20,
+        [TitleLevel.FIFTH]: 18,
+        [TitleLevel.SIXTH]: 16
+      }
+    },
+    badge: {
+      top: 4,
+      left: 6,
+      main: {
+        width: 20,
+        height: 10,
+        value: 'data:image/png;base64,main'
+      },
+      areas: [
+        {
+          areaId: 'area-1',
+          badge: {
+            top: 3,
+            left: 8,
+            width: 12,
+            height: 6,
+            value: 'data:image/png;base64,area'
+          }
+        }
+      ]
+    },
+    header: {
+      key: 'header',
+      elementList: [],
+      blockList: [],
+      height: 0
+    },
+    main: {
+      key: 'main',
+      elementList: [],
+      blockList: [
+        {
+          kind: 'paragraph',
+          element: {
+            value: 'ab',
+            areaId: 'area-1',
+            area: {
+              backgroundColor: '#ffeeaa'
+            }
+          }
+        }
+      ],
+      height: 0
+    },
+    footer: {
+      key: 'footer',
+      elementList: [],
+      blockList: [],
+      height: 0
+    }
+  } as any)
+
+  assert.deepEqual(
+    pageList[0].rasterBlocks.map(
+      ({ x, y, width, height, dataUrl, sourceType, debugLabel }) => ({
+        x,
+        y,
+        width,
+        height,
+        dataUrl,
+        sourceType,
+        debugLabel
+      })
+    ),
+    [
+      {
+        x: 6,
+        y: 4,
+        width: 20,
+        height: 10,
+        dataUrl: 'data:image/png;base64,main',
+        sourceType: 'badge',
+        debugLabel: 'badge:main'
+      },
+      {
+        x: 8,
+        y: 3,
+        width: 12,
+        height: 6,
+        dataUrl: 'data:image/png;base64,area',
+        sourceType: 'badge',
+        debugLabel: 'badge:area-1'
+      }
+    ]
+  )
 }
 
 async function testLayoutDocumentAppendsGraffitiStrokes() {
@@ -3994,6 +4624,1760 @@ async function testLayoutDocumentAppendsGraffitiStrokes() {
     ]
   )
   assert.deepEqual(pageList[0].issues, [])
+}
+
+async function testLayoutDocumentBreaksPageOnPageBreakElement() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        toDataURL() {
+          return 'data:image/png;base64,page-break-fallback'
+        },
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            },
+            fillRect() {
+              return undefined
+            },
+            strokeRect() {
+              return undefined
+            },
+            fillText() {
+              return undefined
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 100,
+      height: 90,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        defaultFont: 'Song',
+        defaultSize: 12,
+        defaultColor: '#000000',
+        defaultRowMargin: 1,
+        defaultBasicRowMarginHeight: 8,
+        backgroundColor: '#ffffff',
+        backgroundImage: '',
+        backgroundSize: BackgroundSize.COVER,
+        backgroundRepeat: BackgroundRepeat.NO_REPEAT,
+        backgroundApplyPageNumbers: [],
+        listInheritStyle: false,
+        labelDefaultColor: '#1976d2',
+        labelDefaultBackgroundColor: '#e3f2fd',
+        labelDefaultBorderRadius: 4,
+        labelDefaultPadding: [4, 4, 4, 4],
+        pageNumber: {
+          bottom: 60,
+          size: 12,
+          font: 'Song',
+          color: '#000000',
+          rowFlex: RowFlex.CENTER,
+          format: '{pageNo}',
+          numberType: NumberType.ARABIC,
+          disabled: true,
+          startPageNo: 1,
+          fromPageNo: 0
+        },
+        watermark: {
+          data: '',
+          type: WatermarkType.TEXT,
+          width: 0,
+          height: 0,
+          color: '#cccccc',
+          opacity: 0.3,
+          size: 20,
+          font: 'Song',
+          repeat: false,
+          gap: [10, 10],
+          numberType: NumberType.ARABIC
+        },
+        pageBorder: {
+          disabled: true,
+          color: '#000000',
+          lineWidth: 1,
+          padding: [0, 5, 0, 5]
+        },
+        lineNumber: {
+          disabled: true,
+          size: 12,
+          font: 'Microsoft YaHei',
+          color: '#000000',
+          right: 20,
+          type: LineNumberType.CONTINUITY
+        },
+        titleSizeMapping: {
+          [TitleLevel.FIRST]: 26,
+          [TitleLevel.SECOND]: 24,
+          [TitleLevel.THIRD]: 22,
+          [TitleLevel.FOURTH]: 20,
+          [TitleLevel.FIFTH]: 18,
+          [TitleLevel.SIXTH]: 16
+        }
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'paragraph',
+            element: {
+              value: 'a'
+            }
+          },
+          {
+            kind: 'paragraph',
+            element: {
+              type: ElementType.PAGE_BREAK,
+              value: ''
+            }
+          },
+          {
+            kind: 'paragraph',
+            element: {
+              value: 'b'
+            }
+          },
+          {
+            kind: 'paragraph',
+            element: {
+              value: 'c'
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      }
+    } as any)
+
+    assert.equal(pageList.length, 2)
+    assert.deepEqual(
+      pageList.map(page => page.textRuns.map(run => run.text)),
+      [['a'], ['b', 'c']]
+    )
+    assert.deepEqual(
+      pageList.map(page => page.rasterBlocks),
+      [[], []]
+    )
+    assert.deepEqual(
+      pageList.map(page => page.issues),
+      [[], []]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRendersTableInsideAreaWrapper() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        toDataURL() {
+          return 'data:image/png;base64,area-wrapper-fallback'
+        },
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            },
+            fillRect() {
+              return undefined
+            },
+            strokeRect() {
+              return undefined
+            },
+            fillText() {
+              return undefined
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.AREA,
+                value: '',
+                areaId: 'area-1',
+                area: {
+                  backgroundColor: '#ffeeaa',
+                  borderColor: '#cc8800'
+                },
+                valueList: [
+                  {
+                    type: ElementType.TABLE,
+                    value: '',
+                    colgroup: [{ width: 80 }],
+                    trList: [
+                      {
+                        height: 24,
+                        tdList: [createTd('ab')]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(pageList[0].textRuns.map(run => run.text), ['ab'])
+    assert.equal(
+      pageList[0].highlightRects.some(rect => rect.color === '#ffeeaa'),
+      true
+    )
+    assert.deepEqual(pageList[0].rasterBlocks, [])
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRendersImageCaptionAndReservesHeight() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,abc',
+                width: 100,
+                height: 40,
+                imgCaption: {
+                  value: 'Fig {imageNo}',
+                  top: 6,
+                  size: 10,
+                  font: 'Song',
+                  color: '#ff0000'
+                }
+              },
+              {
+                value: 'a'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].rasterBlocks.map(({ x, y, width, height, sourceType }) => ({
+        x,
+        y,
+        width,
+        height,
+        sourceType
+      })),
+      [
+        {
+          x: 10,
+          y: 0,
+          width: 100,
+          height: 40,
+          sourceType: 'image'
+        }
+      ]
+    )
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y, font, size, color }) => ({
+        text,
+        x,
+        y,
+        font,
+        size,
+        color
+      })),
+      [
+        {
+          text: 'Fig 1',
+          x: 35,
+          y: 56,
+          font: 'Song',
+          size: 10,
+          color: '#ff0000'
+        },
+        {
+          text: 'a',
+          x: 10,
+          y: 76,
+          font: 'Song',
+          size: 12,
+          color: '#000000'
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRendersTitleWrapperWithMappedSize() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.TITLE,
+                value: '',
+                level: TitleLevel.FIRST,
+                titleId: 'title-1',
+                valueList: [
+                  {
+                    value: 'ab'
+                  }
+                ]
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, size, bold }) => ({
+        text,
+        size,
+        bold
+      })),
+      [
+        {
+          text: 'ab',
+          size: 26,
+          bold: true
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentKeepsTitleWrapperInlineChildrenInOneBlock() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.TITLE,
+                value: '',
+                level: TitleLevel.FIRST,
+                titleId: 'title-2',
+                valueList: [
+                  {
+                    value: 'a'
+                  },
+                  {
+                    value: 'b'
+                  }
+                ]
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, y, size, bold }) => ({
+        text,
+        y,
+        size,
+        bold
+      })),
+      [
+        {
+          text: 'ab',
+          y: 34,
+          size: 26,
+          bold: true
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRendersHyperlinkWrapperLinks() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.HYPERLINK,
+                value: '',
+                url: 'https://example.com',
+                valueList: [
+                  {
+                    value: 'ab'
+                  }
+                ]
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(pageList[0].textRuns.map(run => run.text), ['ab'])
+    assert.deepEqual(
+      pageList[0].links.map(({ x, y, width, height, url }) => ({
+        x,
+        y,
+        width,
+        height,
+        url
+      })),
+      [
+        {
+          x: 10,
+          y: 8,
+          width: 20,
+          height: 24,
+          url: 'https://example.com'
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentPlacesFloatingImageOutsideMainFlow() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                value: 'a'
+              },
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,float-image',
+                width: 40,
+                height: 20,
+                imgDisplay: ImageDisplay.FLOAT_TOP,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 30,
+                  y: 25
+                }
+              },
+              {
+                value: 'b'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y }) => ({
+        text,
+        x,
+        y
+      })),
+      [
+        {
+          text: 'a',
+          x: 10,
+          y: 20
+        },
+        {
+          text: 'b',
+          x: 10,
+          y: 60
+        }
+      ]
+    )
+    assert.deepEqual(
+      pageList[0].rasterBlocks.map(({ x, y, width, height, sourceType }) => ({
+        x,
+        y,
+        width,
+        height,
+        sourceType
+      })),
+      [
+        {
+          x: 30,
+          y: 25,
+          width: 40,
+          height: 20,
+          sourceType: 'image'
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentExtendsPageCountForLaterFloatingImage() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                value: 'a'
+              },
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,float-image-page-2',
+                width: 40,
+                height: 20,
+                imgDisplay: ImageDisplay.FLOAT_TOP,
+                imgFloatPosition: {
+                  pageNo: 1,
+                  x: 25,
+                  y: 15
+                }
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.equal(pageList.length, 2)
+    assert.deepEqual(pageList[0].textRuns.map(run => run.text), ['a'])
+    assert.deepEqual(pageList[0].rasterBlocks, [])
+    assert.deepEqual(
+      pageList[1].rasterBlocks.map(({ x, y, width, height, sourceType }) => ({
+        x,
+        y,
+        width,
+        height,
+        sourceType
+      })),
+      [
+        {
+          x: 25,
+          y: 15,
+          width: 40,
+          height: 20,
+          sourceType: 'image'
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentWrapsTextAroundSurroundImage() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                value: 'a'
+              },
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,surround-image',
+                width: 40,
+                height: 20,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 30,
+                  y: 45
+                }
+              },
+              {
+                value: 'b'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y }) => ({
+        text,
+        x,
+        y
+      })),
+      [
+        {
+          text: 'a',
+          x: 10,
+          y: 20
+        },
+        {
+          text: 'b',
+          x: 70,
+          y: 60
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentMovesTextBelowSurroundImageWhenRightSideIsTooNarrow() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,surround-image-wide',
+                width: 55,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 30,
+                  y: 8
+                }
+              },
+              {
+                value: 'abcdef'
+              },
+              {
+                value: 'gh'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y }) => ({
+        text,
+        x,
+        y
+      })),
+      [
+        {
+          text: 'abcdef',
+          x: 10,
+          y: 44
+        },
+        {
+          text: 'gh',
+          x: 10,
+          y: 84
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRepeatsHeaderAndFooterFloatingImages() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,header-float',
+                width: 24,
+                height: 12,
+                imgDisplay: ImageDisplay.FLOAT_TOP,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 5,
+                  y: 6
+                }
+              }
+            ],
+            main: [
+              {
+                value: 'a'
+              },
+              {
+                type: ElementType.PAGE_BREAK,
+                value: ''
+              },
+              {
+                value: 'b'
+              }
+            ],
+            footer: [
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,footer-float',
+                width: 30,
+                height: 10,
+                imgDisplay: ImageDisplay.FLOAT_BOTTOM,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 12,
+                  y: 90
+                }
+              }
+            ],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.equal(pageList.length, 2)
+    assert.deepEqual(
+      pageList.map(page =>
+        page.rasterBlocks.map(
+          ({ dataUrl, x, y, width, height, layer, sourceType }) => ({
+            dataUrl,
+            x,
+            y,
+            width,
+            height,
+            layer,
+            sourceType
+          })
+        )
+      ),
+      [
+        [
+          {
+            dataUrl: 'data:image/png;base64,header-float',
+            x: 5,
+            y: 6,
+            width: 24,
+            height: 12,
+            layer: 'overlay',
+            sourceType: 'image'
+          },
+          {
+            dataUrl: 'data:image/png;base64,footer-float',
+            x: 12,
+            y: 90,
+            width: 30,
+            height: 10,
+            layer: 'content',
+            sourceType: 'image'
+          }
+        ],
+        [
+          {
+            dataUrl: 'data:image/png;base64,header-float',
+            x: 5,
+            y: 6,
+            width: 24,
+            height: 12,
+            layer: 'overlay',
+            sourceType: 'image'
+          },
+          {
+            dataUrl: 'data:image/png;base64,footer-float',
+            x: 12,
+            y: 90,
+            width: 30,
+            height: 10,
+            layer: 'content',
+            sourceType: 'image'
+          }
+        ]
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentAssignsCoreDrawStages() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument({
+      width: 100,
+      height: 120,
+      margins: [0, 0, 0, 0],
+      scale: 1,
+      defaults: {
+        ...createRuntimeSourceOptions(),
+        pageBorder: {
+          disabled: false,
+          color: '#aa0000',
+          lineWidth: 1,
+          padding: [0, 0, 0, 0]
+        },
+        lineNumber: {
+          disabled: false,
+          size: 12,
+          font: 'Song',
+          color: '#333333',
+          right: 10,
+          type: LineNumberType.CONTINUITY
+        }
+      } as any,
+      badge: {
+        top: 0,
+        left: 4,
+        main: {
+          width: 12,
+          height: 8,
+          value: 'data:image/png;base64,badge'
+        },
+        areas: []
+      },
+      header: {
+        key: 'header',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      main: {
+        key: 'main',
+        elementList: [],
+        blockList: [
+          {
+            kind: 'paragraph',
+            element: {
+              value: 'a'
+            }
+          },
+          {
+            kind: 'image',
+            element: {
+              type: ElementType.IMAGE,
+              value: 'data:image/png;base64,float-top',
+              width: 20,
+              height: 10,
+              imgDisplay: ImageDisplay.FLOAT_TOP,
+              imgFloatPosition: {
+                pageNo: 0,
+                x: 30,
+                y: 10
+              }
+            }
+          }
+        ],
+        height: 0
+      },
+      footer: {
+        key: 'footer',
+        elementList: [],
+        blockList: [],
+        height: 0
+      },
+      graffiti: [
+        {
+          pageNo: 0,
+          strokes: [
+            {
+              lineWidth: 2,
+              lineColor: '#00bb00',
+              points: [1, 2, 20, 30]
+            }
+          ]
+        }
+      ]
+    } as any)
+
+    const page = pageList[0]
+    const floatTop = page.rasterBlocks.find(
+      block => block.dataUrl === 'data:image/png;base64,float-top'
+    ) as any
+    const badge = page.rasterBlocks.find(
+      block => block.dataUrl === 'data:image/png;base64,badge'
+    ) as any
+    const lineNumber = page.textRuns.find(run => run.text === '1') as any
+    const pageBorder = page.vectorLines.find(
+      line => line.color === '#aa0000'
+    ) as any
+    const graffiti = page.vectorLines.find(
+      line => line.color === '#00bb00'
+    ) as any
+
+    assert.equal(floatTop.stage, 50)
+    assert.equal(lineNumber.stage, 60)
+    assert.equal(pageBorder.stage, 70)
+    assert.equal(badge.stage, 80)
+    assert.equal(graffiti.stage, 90)
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentAssignsHeaderFooterAndPageNumberStages() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const option = createRuntimeSourceOptions()
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [
+              {
+                value: 'H'
+              }
+            ],
+            main: [
+              {
+                value: 'M'
+              }
+            ],
+            footer: [
+              {
+                value: 'F'
+              }
+            ],
+            graffiti: []
+          }
+        },
+        options: {
+          ...option,
+          pageNumber: {
+            ...option.pageNumber,
+            disabled: false,
+            format: '{pageNo}'
+          }
+        }
+      } as any)
+    )
+
+    const page = pageList[0]
+    const mainRun = page.textRuns.find(run => run.text === 'M') as any
+    const headerRun = page.textRuns.find(run => run.text === 'H') as any
+    const footerRun = page.textRuns.find(run => run.text === 'F') as any
+    const pageNoRun = page.textRuns.find(run => run.text === '1') as any
+
+    assert.equal(mainRun.stage, 30)
+    assert.equal(headerRun.stage, 40)
+    assert.equal(pageNoRun.stage, 41)
+    assert.equal(footerRun.stage, 42)
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentAssignsStaticZoneBlockStages() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [
+              {
+                type: ElementType.TABLE,
+                value: '',
+                borderType: TableBorder.ALL,
+                borderColor: '#123456',
+                borderWidth: 1,
+                colgroup: [{ width: 40 }],
+                trList: [
+                  {
+                    height: 20,
+                    tdList: [createTd('HT')]
+                  }
+                ]
+              }
+            ],
+            main: [
+              {
+                value: 'M'
+              }
+            ],
+            footer: [
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,footer-image',
+                width: 24,
+                height: 12
+              }
+            ],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    const page = pageList[0]
+    const headerTableText = page.textRuns.find(run => run.text === 'HT') as any
+    const headerTableLine = page.vectorLines.find(
+      line => line.color === '#123456'
+    ) as any
+    const footerImage = page.rasterBlocks.find(
+      block => block.dataUrl === 'data:image/png;base64,footer-image'
+    ) as any
+
+    assert.equal(headerTableText.stage, 40)
+    assert.equal(headerTableLine.stage, 40)
+    assert.equal(footerImage.stage, 42)
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentAssignsStaticZoneControlBorderStage() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,unexpected-static-zone-control-border-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [
+              {
+                type: ElementType.CONTROL,
+                value: '',
+                control: {
+                  type: 'text',
+                  border: true,
+                  value: [
+                    {
+                      value: 'abc'
+                    }
+                  ]
+                }
+              }
+            ],
+            main: [
+              {
+                value: 'M'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...createRuntimeSourceOptions(),
+          control: {
+            borderWidth: 2,
+            borderColor: '#123456'
+          }
+        }
+      } as any)
+    )
+
+    const page = pageList[0]
+    const borderLine = page.vectorLines.find(
+      line => line.color === '#123456' && line.width === 2
+    ) as any
+
+    assert.ok(borderLine)
+    assert.equal(borderLine.stage, 40)
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentMarksStaticZoneLatexAsPending() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  const ctx = {
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    font: '',
+    measureText(text: string) {
+      return {
+        width: text.length * 10,
+        actualBoundingBoxAscent: 12,
+        actualBoundingBoxDescent: 8
+      }
+    },
+    fillRect() {
+      return undefined
+    },
+    strokeRect() {
+      return undefined
+    },
+    fillText() {
+      return undefined
+    }
+  }
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,static-zone-latex-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [
+              {
+                type: ElementType.LATEX,
+                value: 'x^2',
+                laTexSVG: '<svg></svg>'
+              }
+            ],
+            main: [
+              {
+                value: 'M'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(pageList[0].issues, ['pending:latex', 'fallback:latex'])
+    assert.equal(pageList[0].rasterBlocks[0]?.stage, 40)
+    assert.equal(
+      pageList[0].rasterBlocks[0]?.dataUrl,
+      'data:image/png;base64,static-zone-latex-fallback'
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+function testPartitionsRasterBlocksByLayer() {
+  const result = partitionRasterBlocksByLayer([
+    {
+      pageNo: 0,
+      x: 0,
+      y: 0,
+      width: 10,
+      height: 10,
+      dataUrl: 'background',
+      layer: 'background'
+    },
+    {
+      pageNo: 0,
+      x: 0,
+      y: 0,
+      width: 10,
+      height: 10,
+      dataUrl: 'content'
+    },
+    {
+      pageNo: 0,
+      x: 0,
+      y: 0,
+      width: 10,
+      height: 10,
+      dataUrl: 'overlay',
+      layer: 'overlay'
+    }
+  ])
+
+  assert.deepEqual(
+    result.background.map((item: { dataUrl: string }) => item.dataUrl),
+    ['background']
+  )
+  assert.deepEqual(
+    result.content.map((item: { dataUrl: string }) => item.dataUrl),
+    ['content']
+  )
+  assert.deepEqual(
+    result.overlay.map((item: { dataUrl: string }) => item.dataUrl),
+    ['overlay']
+  )
+}
+
+function testCollectsPageRenderOperationsByStageOrder() {
+  const operationList = collectPageRenderOperations({
+    pageNo: 0,
+    width: 100,
+    height: 100,
+    textRuns: [
+      {
+        pageNo: 0,
+        text: 'content',
+        x: 0,
+        y: 0,
+        width: 10,
+        height: 10,
+        font: 'Song',
+        size: 12,
+        stage: 30
+      },
+      {
+        pageNo: 0,
+        text: 'header',
+        x: 0,
+        y: 0,
+        width: 10,
+        height: 10,
+        font: 'Song',
+        size: 12,
+        stage: 40
+      },
+      {
+        pageNo: 0,
+        text: 'page-number',
+        x: 0,
+        y: 0,
+        width: 10,
+        height: 10,
+        font: 'Song',
+        size: 12,
+        stage: 41
+      },
+      {
+        pageNo: 0,
+        text: 'footer',
+        x: 0,
+        y: 0,
+        width: 10,
+        height: 10,
+        font: 'Song',
+        size: 12,
+        stage: 42
+      },
+      {
+        pageNo: 0,
+        text: 'lineNo',
+        x: 0,
+        y: 0,
+        width: 10,
+        height: 10,
+        font: 'Song',
+        size: 12,
+        stage: 60
+      }
+    ],
+    highlightRects: [],
+    links: [],
+    vectorLines: [
+      {
+        pageNo: 0,
+        x1: 0,
+        y1: 0,
+        x2: 10,
+        y2: 10,
+        color: '#aa0000',
+        stage: 70
+      },
+      {
+        pageNo: 0,
+        x1: 0,
+        y1: 0,
+        x2: 10,
+        y2: 10,
+        color: '#00bb00',
+        stage: 90
+      }
+    ],
+    rasterBlocks: [
+      {
+        pageNo: 0,
+        x: 0,
+        y: 0,
+        width: 10,
+        height: 10,
+        dataUrl: 'content-image',
+        stage: 20
+      },
+      {
+        pageNo: 0,
+        x: 0,
+        y: 0,
+        width: 10,
+        height: 10,
+        dataUrl: 'float-top-image',
+        stage: 50
+      },
+      {
+        pageNo: 0,
+        x: 0,
+        y: 0,
+        width: 10,
+        height: 10,
+        dataUrl: 'badge-image',
+        stage: 80
+      }
+    ],
+    issues: []
+  } as any)
+
+  assert.deepEqual(
+    operationList.map(operation => `${operation.stage}:${operation.kind}`),
+    [
+      '20:raster',
+      '30:text',
+      '40:text',
+      '41:text',
+      '42:text',
+      '50:raster',
+      '60:text',
+      '70:vector',
+      '80:raster',
+      '90:vector'
+    ]
+  )
 }
 
 function testCreatesCenteredPageNumberPlacement() {
@@ -4491,6 +6875,161 @@ function testResolvesPdfBoldItalicFontStyle() {
   )
 }
 
+function testRenderTextRunsAppliesLetterSpacingCharSpace() {
+  const charSpaceList: number[] = []
+  const textCallList: Array<{
+    text: string
+    x: number
+    y: number
+  }> = []
+  const doc = {
+    getFontList() {
+      return {
+        Song: ['normal']
+      }
+    },
+    setFont() {
+      return this
+    },
+    setFontSize() {
+      return this
+    },
+    setTextColor() {
+      return this
+    },
+    setCharSpace(value: number) {
+      charSpaceList.push(value)
+      return this
+    },
+    text(text: string, x: number, y: number) {
+      textCallList.push({
+        text,
+        x,
+        y
+      })
+      return this
+    }
+  }
+
+  renderTextRuns(
+    doc as any,
+    {
+      pageNo: 0,
+      width: 100,
+      height: 100,
+      textRuns: [
+        {
+          pageNo: 0,
+          text: 'ab',
+          x: 10,
+          y: 20,
+          width: 30,
+          height: 20,
+          font: 'Song',
+          size: 12,
+          color: '#000000',
+          letterSpacing: 5
+        }
+      ],
+      highlightRects: [],
+      links: [],
+      vectorLines: [],
+      rasterBlocks: [],
+      issues: []
+    },
+    'Song'
+  )
+
+  assert.deepEqual(charSpaceList, [5, 0])
+  assert.deepEqual(textCallList, [
+    {
+      text: 'ab',
+      x: 10,
+      y: 20
+    }
+  ])
+}
+
+async function testRenderImagesAppliesCropBeforeAddingImage() {
+  const previousImage = globalThis.Image
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+  const drawImageCallList: unknown[][] = []
+  const addImageCallList: unknown[][] = []
+
+  class MockImage {
+    crossOrigin = ''
+    onload: null | (() => void) = null
+    onerror: null | (() => void) = null
+
+    set src(_value: string) {
+      this.onload?.()
+    }
+  }
+
+  runtimeGlobal.Image = MockImage
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        width: 0,
+        height: 0,
+        toDataURL() {
+          return 'data:image/png;base64,cropped'
+        },
+        getContext() {
+          return {
+            drawImage(...args: unknown[]) {
+              drawImageCallList.push(args)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    await renderImages(
+      {
+        addImage(...args: unknown[]) {
+          addImageCallList.push(args)
+        }
+      } as any,
+      [
+        {
+          pageNo: 0,
+          x: 10,
+          y: 20,
+          width: 60,
+          height: 40,
+          dataUrl: 'data:image/png;base64,abc',
+          sourceType: 'image',
+          crop: {
+            x: 5,
+            y: 6,
+            width: 20,
+            height: 10
+          }
+        }
+      ]
+    )
+
+    assert.deepEqual(
+      drawImageCallList.map(args => args.slice(1)),
+      [[5, 6, 20, 10, 0, 0, 60, 40]]
+    )
+    assert.deepEqual(addImageCallList, [
+      ['data:image/png;base64,cropped', 'PNG', 10, 20, 60, 40, undefined, undefined, 0]
+    ])
+  } finally {
+    runtimeGlobal.Image = previousImage
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 function testCentersCellTextVertically() {
   const placementList = createTableCellTextPlacements({
     td: {
@@ -4867,10 +7406,18 @@ async function run() {
   testMeasuresRowHeightByActualColumnWidth()
   testMeasuresRowHeightByResolvedCellTextSize()
   testDistributesRowspanExtraHeightToSpanTailRow()
+  testNormalizeDocumentSkipsHiddenElements()
+  testTracksBadgeStateViaWrappedCommands()
+  testNormalizeDocumentCopiesBadgeState()
   testCreatesPerLineTextPlacements()
   testResolvesTitleFallbackStyleFromLevel()
   testResolvesOrderedListPrefixWidthAcrossListGroup()
   testOffsetsParagraphPlacementsByResolvedListIndent()
+  testCentersParagraphPlacementsByRowFlex()
+  testRightAlignsParagraphPlacementsByRowFlex()
+  testJustifiesParagraphPlacementsByRowFlex()
+  testAlignsWrappedParagraphPlacementsByRowFlex()
+  testReservesTabWidthInParagraphPlacements()
   testShrinksAndRaisesSuperscriptRuns()
   testShrinksAndLowersSubscriptRuns()
   testCreatesSeparatorVectorLine()
@@ -4896,7 +7443,24 @@ async function run() {
   await testLayoutDocumentMarksLatexAsPending()
   await testLayoutDocumentMarksBlockIframeAndVideoAsPending()
   await testLayoutDocumentAppendsAreaDecorations()
+  await testLayoutDocumentAppendsMainAndAreaBadges()
   await testLayoutDocumentAppendsGraffitiStrokes()
+  await testLayoutDocumentBreaksPageOnPageBreakElement()
+  await testLayoutDocumentRendersTableInsideAreaWrapper()
+  await testLayoutDocumentRendersImageCaptionAndReservesHeight()
+  await testLayoutDocumentRendersTitleWrapperWithMappedSize()
+  await testLayoutDocumentKeepsTitleWrapperInlineChildrenInOneBlock()
+  await testLayoutDocumentRendersHyperlinkWrapperLinks()
+  await testLayoutDocumentPlacesFloatingImageOutsideMainFlow()
+  await testLayoutDocumentExtendsPageCountForLaterFloatingImage()
+  await testLayoutDocumentWrapsTextAroundSurroundImage()
+  await testLayoutDocumentMovesTextBelowSurroundImageWhenRightSideIsTooNarrow()
+  await testLayoutDocumentRepeatsHeaderAndFooterFloatingImages()
+  await testLayoutDocumentAssignsCoreDrawStages()
+  await testLayoutDocumentAssignsHeaderFooterAndPageNumberStages()
+  await testLayoutDocumentAssignsStaticZoneBlockStages()
+  await testLayoutDocumentAssignsStaticZoneControlBorderStage()
+  await testLayoutDocumentMarksStaticZoneLatexAsPending()
   testCreatesCenteredPageNumberPlacement()
   testCreatesContinuityLineNumberPlacements()
   testCreatesPageScopedLineNumberPlacements()
@@ -4909,6 +7473,8 @@ async function run() {
   testCreatesDecorationLinesFromPlacements()
   testInheritsTableCellTextStyleFromCellElement()
   testCreatesSeparateTableCellPlacementsForMultipleRuns()
+  testPartitionsRasterBlocksByLayer()
+  testCollectsPageRenderOperationsByStageOrder()
   testCentersCellTextVertically()
   testBottomAlignsCellText()
   testRepeatsTableHeaderRowsAcrossPages()
@@ -4924,6 +7490,8 @@ async function run() {
   testLayoutTableAssignsColumnIndexAfterLeadingRowspan()
   testLayoutTableComputesSpanGeometry()
   testResolvesPdfBoldItalicFontStyle()
+  testRenderTextRunsAppliesLetterSpacingCharSpace()
+  await testRenderImagesAppliesCropBeforeAddingImage()
 }
 
 run().catch(error => {

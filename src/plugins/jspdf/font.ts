@@ -1,5 +1,6 @@
 import type jsPDF from 'jspdf'
 import { SONG_TTF_URL } from './assets/song'
+import { resolvePdfFontFamily } from './render/fontFamily'
 
 export interface IFontBootstrapOption {
   fonts?: Record<string, string>
@@ -83,26 +84,6 @@ async function registerSongFallback(doc: jsPDF, debug?: boolean) {
   } catch (e) {
     warn(debug, 'Failed to register Song fallback font', e)
   }
-}
-
-function getAvailableFontFamilySet(doc: jsPDF) {
-  const fontList = doc.getFontList()
-  return new Set(
-    Object.keys(fontList).map(fontFamily => fontFamily.toLowerCase())
-  )
-}
-
-export function resolvePdfFontFamily(
-  doc: jsPDF,
-  fontFamily?: string,
-  fallbackFontFamily = 'helvetica'
-) {
-  const availableFonts = getAvailableFontFamilySet(doc)
-  const candidate = fontFamily?.trim().toLowerCase()
-  if (candidate && availableFonts.has(candidate)) {
-    return fontFamily!
-  }
-  return fallbackFontFamily
 }
 
 async function registerFontFromUrl(

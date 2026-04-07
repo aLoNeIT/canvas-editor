@@ -4,7 +4,10 @@ import { rasterizeElement } from './fallback/rasterizeElement'
 import { layoutTable } from './layout/layoutTable'
 import type { IDocumentBlockNode } from './model/document'
 import type { IPageModel } from './model/layout'
-import { renderImages } from './render/renderImage'
+import {
+  partitionRasterBlocksByLayer,
+  renderImages
+} from './render/renderImage'
 import { renderTextRuns } from './render/renderText'
 import { renderVectorLines } from './render/renderVector'
 
@@ -25,4 +28,5 @@ resolveFallback(page, {
 rasterizeElement(() => undefined, 10, 10, 'image')
 renderTextRuns(doc, page, 'Song')
 renderVectorLines(doc, page)
-renderImages(doc, page)
+partitionRasterBlocksByLayer(page.rasterBlocks)
+renderImages(doc, page.rasterBlocks)

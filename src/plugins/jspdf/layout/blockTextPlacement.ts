@@ -1,4 +1,5 @@
 import type { IElement } from '../../../editor/interface/Element'
+import { RowFlex } from '../../../editor/dataset/enum/Row'
 import type { ITextPlacement } from './textPlacement'
 import {
   createStyledTextRunPlacements,
@@ -18,6 +19,7 @@ export interface ICreateBlockTextPlacementsOption {
   fallbackBold?: boolean
   fallbackItalic?: boolean
   fallbackLineHeight?: number
+  fallbackTabWidth?: number
   fallbackControlPlaceholderColor?: string
   fallbackControlBracketColor?: string
   fallbackControlPrefix?: string
@@ -51,6 +53,7 @@ export function createBlockTextPlacementResult(
     bold: option.fallbackBold,
     italic: option.fallbackItalic,
     lineHeight: option.fallbackLineHeight,
+    tabWidth: option.fallbackTabWidth,
     controlPlaceholderColor: option.fallbackControlPlaceholderColor,
     controlBracketColor: option.fallbackControlBracketColor,
     controlPrefix: option.fallbackControlPrefix,
@@ -71,6 +74,13 @@ export function createBlockTextPlacementResult(
     x: option.x + (option.indent || 0),
     y: option.y,
     width: Math.max(1, option.width - (option.indent || 0)),
+    rowFlex:
+      option.element.rowFlex === RowFlex.CENTER ||
+      option.element.rowFlex === RowFlex.RIGHT ||
+      option.element.rowFlex === RowFlex.ALIGNMENT ||
+      option.element.rowFlex === RowFlex.JUSTIFY
+        ? option.element.rowFlex
+        : undefined,
     measureWidth: option.measureWidth
   })
 }

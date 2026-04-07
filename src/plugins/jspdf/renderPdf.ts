@@ -4,8 +4,9 @@ import { bootstrapPdfFonts } from './font'
 import type { IFontBootstrapOption } from './font'
 import type { IPageModel } from './model/layout'
 import { renderImages } from './render/renderImage'
-import { renderTextRuns } from './render/renderText'
-import { renderVectorLines } from './render/renderVector'
+import { collectPageRenderOperations } from './render/renderStage'
+import { renderTextRun } from './render/renderText'
+import { renderVectorLine } from './render/renderVector'
 
 export interface IRenderPdfOption extends IFontBootstrapOption {
   paperDirection?: PaperDirection
@@ -51,27 +52,59 @@ export async function renderPdfBase64(
   const { defaultFontFamily } = await bootstrapPdfFonts(doc, options)
 
   const renderPage = async (page: IPageModel) => {
-    page.highlightRects.forEach(rect => {
-      const gStateCtor = (doc as any).GState
-      if (gStateCtor && typeof doc.setGState === 'function') {
-        doc.setGState(new gStateCtor({ opacity: rect.opacity }))
-      }
-      doc.setFillColor(rect.color)
-      doc.rect(rect.x, rect.y, rect.width, rect.height, 'F')
-      if (typeof doc.setGState === 'function' && gStateCtor) {
-        doc.setGState(new gStateCtor({ opacity: 1 }))
-      }
-    })
+    if (
+      !page.highlightRects.length &&
+      !page.textRuns.length &&
+      !page.vectorLines.length &&
+      !page.links.length &&
+      !page.rasterBlocks.length
+    ) {
+      return
+    }
 
-    renderTextRuns(doc, page, defaultFontFamily)
-    renderVectorLines(doc, page)
-    await renderImages(doc, page)
+    const operationList = collectPageRenderOperations(page)
 
-    page.links.forEach(link => {
-      doc.link(link.x, link.y, link.width, link.height, {
-        url: link.url
-      })
-    })
+    for (const operation of operationList) {
+      if (operation.kind === 'highlight') {
+        const rect = operation.item
+        const gStateCtor = (doc as any).GState
+        if (gStateCtor && typeof doc.setGState === 'function') {
+          doc.setGState(new gStateCtor({ opacity: rect.opacity }))
+        }
+        doc.setFillColor(rect.color)
+        doc.rect(rect.x, rect.y, rect.width, rect.height, 'F')
+        if (typeof doc.setGState === 'function' && gStateCtor) {
+          doc.setGState(new gStateCtor({ opacity: 1 }))
+        }
+        continue
+      }
+
+      if (operation.kind === 'raster') {
+        // eslint-disable-next-line no-await-in-loop
+        await renderImages(doc, [operation.item])
+        continue
+      }
+
+      if (operation.kind === 'text') {
+        renderTextRun(doc, operation.item, defaultFontFamily)
+        continue
+      }
+
+      if (operation.kind === 'vector') {
+        renderVectorLine(doc, operation.item)
+        continue
+      }
+
+      doc.link(
+        operation.item.x,
+        operation.item.y,
+        operation.item.width,
+        operation.item.height,
+        {
+          url: operation.item.url
+        }
+      )
+    }
   }
 
   await renderPage(first)

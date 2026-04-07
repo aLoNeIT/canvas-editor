@@ -8,6 +8,7 @@ export interface IMeasureTableRowHeightOption {
   minHeight?: number
   baseCellWidth?: number
   columnWidthList?: number[]
+  tabWidth?: number
   measureWidth: (
     text: string,
     style?: {
@@ -23,6 +24,7 @@ export interface IMeasureTableRowHeightOption {
 export interface IResolveTableRowHeightListOption {
   rowList: ITableRowFragment[]
   columnWidthList: number[]
+  tabWidth?: number
   measureWidth: (
     text: string,
     style?: {
@@ -47,11 +49,13 @@ function getTableCellContentHeight(
     }
   ) => number,
   lineHeight: number,
+  tabWidth?: number,
   baseCellWidth?: number,
   columnWidthList?: number[]
 ) {
   const runList = extractTableCellTextRuns(td, {
-    lineHeight
+    lineHeight,
+    tabWidth
   })
   if (!runList.length) return 0
   const colspan = Math.max(1, td.colspan || 1)
@@ -81,6 +85,7 @@ export function measureTableRowHeight(
         td,
         option.measureWidth,
         option.lineHeight,
+        option.tabWidth,
         option.baseCellWidth,
         option.columnWidthList
       )
@@ -102,6 +107,7 @@ export function resolveTableRowHeightList(
         td,
         option.measureWidth,
         option.lineHeight,
+        option.tabWidth,
         undefined,
         option.columnWidthList
       )

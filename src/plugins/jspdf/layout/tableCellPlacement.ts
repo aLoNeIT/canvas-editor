@@ -12,6 +12,7 @@ export interface ICreateTableCellTextPlacementsOption {
   font?: string
   size?: number
   lineHeight?: number
+  tabWidth?: number
   color?: string
   bold?: boolean
   italic?: boolean
@@ -50,7 +51,8 @@ export function createTableCellTextPlacements(
     color: option.color,
     bold: option.bold,
     italic: option.italic,
-    lineHeight: option.lineHeight
+    lineHeight: option.lineHeight,
+    tabWidth: option.tabWidth
   })
   if (!runList.length) return []
 

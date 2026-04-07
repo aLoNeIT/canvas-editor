@@ -715,9 +715,11 @@ git commit -m "feat: implement jspdf layout renderer and fallback"
 功能：基于 `jspdf` 插件内独立排版引擎导出 PDF Base64
 
 ```javascript
+import simsunTtfUrl from '../../src/assets/fonts/simsun.ttf'
+
 instance.use(jspdfPlugin, {
   fonts: {
-    SimSun: 'https://example.com/fonts/simsun.ttf'
+    SimSun: simsunTtfUrl
   }
 })
 

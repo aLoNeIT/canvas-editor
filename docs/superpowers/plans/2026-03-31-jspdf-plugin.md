@@ -657,10 +657,11 @@ Use the app entry to create a manual verification path.
 
 ```ts
 import { jspdfPlugin } from './plugins/jspdf'
+import simsunTtfUrl from './assets/fonts/simsun.ttf'
 
 instance.use(jspdfPlugin, {
   fonts: {
-    SimSun: 'https://example.com/fonts/simsun.ttf'
+    SimSun: simsunTtfUrl
   }
 })
 ```
@@ -685,10 +686,11 @@ Update the custom plugin guide with the new plugin usage example.
 
 ```md
 import { jspdfPlugin } from '../src/plugins/jspdf'
+import simsunTtfUrl from '../src/assets/fonts/simsun.ttf'
 
 instance.use(jspdfPlugin, {
   fonts: {
-    SimSun: 'https://example.com/fonts/simsun.ttf'
+    SimSun: simsunTtfUrl
   }
 })
 ```
@@ -698,11 +700,13 @@ instance.use(jspdfPlugin, {
 Add an `executeExportPdfBase64` section to `docs/guide/command-execute.md`.
 
 ```md
+import simsunTtfUrl from './src/assets/fonts/simsun.ttf'
+
 ## executeExportPdfBase64
 
 instance.command.executeExportPdfBase64({
   fonts: {
-    SimSun: 'https://example.com/fonts/simsun.ttf'
+    SimSun: simsunTtfUrl
   }
 })
 ```

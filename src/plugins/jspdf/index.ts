@@ -8,6 +8,7 @@ import { assertNoFallback } from './debug/assertNoFallback'
 import { collectDiagnostics } from './debug/collectDiagnostics'
 import { normalizeDocument } from './normalize/normalizeDocument'
 import { renderPdfBase64 } from './renderPdf'
+import { installBadgeStateTracking } from './source/badgeState'
 import { readEditorState } from './source/readEditorState'
 
 export interface IJspdfPluginOption {
@@ -30,6 +31,7 @@ export type CommandWithJspdf = Command & {
 
 export function jspdfPlugin(editor: Editor, options: IJspdfPluginOption = {}) {
   const command = editor.command as CommandWithJspdf
+  installBadgeStateTracking(editor)
 
   command.executeExportPdfDiagnostics = async payload => {
     const finalOption: IJspdfExportOption = {

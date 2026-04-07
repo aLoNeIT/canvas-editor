@@ -8,6 +8,7 @@ import type { LineNumberType } from '../../../editor/dataset/enum/LineNumber'
 import type { RowFlex } from '../../../editor/dataset/enum/Row'
 import type { TitleLevel } from '../../../editor/dataset/enum/Title'
 import type { WatermarkType } from '../../../editor/dataset/enum/Watermark'
+import type { IAreaBadge, IBadge } from '../../../editor/interface/Badge'
 
 export interface IDocumentGraffitiStroke {
   lineWidth: number
@@ -64,6 +65,7 @@ export interface IZoneModel {
 export interface IDocumentLayoutDefaults {
   defaultFont: string
   defaultSize: number
+  defaultTabWidth?: number
   defaultColor: string
   defaultRowMargin: number
   defaultBasicRowMarginHeight: number
@@ -77,6 +79,12 @@ export interface IDocumentLayoutDefaults {
   labelDefaultBackgroundColor: string
   labelDefaultBorderRadius: number
   labelDefaultPadding: number[]
+  imgCaption: {
+    color: string
+    font: string
+    size: number
+    top: number
+  }
   pageNumber: {
     bottom: number
     size: number
@@ -137,12 +145,20 @@ export interface IDocumentLayoutDefaults {
   titleSizeMapping: Record<TitleLevel, number>
 }
 
+export interface IDocumentBadgeState {
+  top: number
+  left: number
+  main: IBadge | null
+  areas: IAreaBadge[]
+}
+
 export interface IDocumentModel {
   width: number
   height: number
   margins: number[]
   scale: number
   defaults: IDocumentLayoutDefaults
+  badge?: IDocumentBadgeState
   header: IZoneModel
   main: IZoneModel
   footer: IZoneModel

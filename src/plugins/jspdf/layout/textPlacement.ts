@@ -22,6 +22,7 @@ export interface ITextPlacement {
   height: number
   font: string
   size: number
+  widthOverride?: number
   baselineShift?: number
   letterSpacing?: number
   bold?: boolean

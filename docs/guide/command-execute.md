@@ -714,10 +714,11 @@ instance.command.executePrint()
 
 ```javascript
 import { jspdfPlugin, type CommandWithJspdf } from '../../src/plugins/jspdf'
+import simsunTtfUrl from '../../src/assets/fonts/simsun.ttf'
 
 instance.use(jspdfPlugin, {
   fonts: {
-    SimSun: 'https://example.com/fonts/simsun.ttf'
+    SimSun: simsunTtfUrl
   }
 })
 

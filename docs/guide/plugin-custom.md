@@ -28,10 +28,11 @@ instance.use(myPlugin, options?: Option)
 
 ```javascript
 import { jspdfPlugin } from '../../src/plugins/jspdf'
+import simsunTtfUrl from '../../src/assets/fonts/simsun.ttf'
 
 instance.use(jspdfPlugin, {
   fonts: {
-    SimSun: 'https://example.com/fonts/simsun.ttf'
+    SimSun: simsunTtfUrl
   }
 })
 ```
@@ -44,10 +45,11 @@ instance.use(jspdfPlugin, {
 
 ```javascript
 import { jspdfPlugin, type CommandWithJspdf } from '../../src/plugins/jspdf'
+import simsunTtfUrl from '../../src/assets/fonts/simsun.ttf'
 
 instance.use(jspdfPlugin, {
   fonts: {
-    SimSun: 'https://example.com/fonts/simsun.ttf'
+    SimSun: simsunTtfUrl
   }
 })
 

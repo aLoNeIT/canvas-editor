@@ -5,6 +5,7 @@ import type {
   IDocumentModel,
   IZoneModel
 } from '../model/document'
+import { ElementType } from '../../../editor/dataset/enum/Element'
 import { TitleLevel } from '../../../editor/dataset/enum/Title'
 
 function getBlockKind(element: IDocumentBlockNode['element']): IDocumentBlockNode['kind'] {
@@ -26,18 +27,99 @@ function getBlockKind(element: IDocumentBlockNode['element']): IDocumentBlockNod
   }
 }
 
+function isVirtualWrapperElement(element: IDocumentBlockNode['element']) {
+  return (
+    element.type === ElementType.AREA ||
+    element.type === ElementType.TITLE ||
+    element.type === ElementType.LIST ||
+    element.type === ElementType.HYPERLINK ||
+    element.type === ElementType.DATE
+  )
+}
+
+function isFlattenWrapperElement(element: IDocumentBlockNode['element']) {
+  return element.type === ElementType.AREA
+}
+
+function isHiddenElement(element: IDocumentBlockNode['element']) {
+  return Boolean(element.hide || element.control?.hide || element.area?.hide)
+}
+
+function mergeAreaIntoChild(
+  area: IDocumentBlockNode['element'],
+  child: IDocumentBlockNode['element']
+) {
+  const {
+    type: _type,
+    value: _value,
+    valueList: _valueList,
+    ...inherited
+  } = area
+  void _type
+  void _value
+  void _valueList
+
+  return {
+    ...inherited,
+    ...child
+  }
+}
+
+function normalizeValueList(
+  elementList: IJspdfSourceState['result']['data']['main']
+): IJspdfSourceState['result']['data']['main'] {
+  return elementList.flatMap(element => {
+    if (isHiddenElement(element)) {
+      return []
+    }
+
+    if (!element.valueList?.length) {
+      return [element]
+    }
+
+    if (!isVirtualWrapperElement(element)) {
+      const normalizedChildren = normalizeValueList(element.valueList)
+      return [
+        {
+          ...element,
+          valueList: normalizedChildren
+        }
+      ]
+    }
+
+    if (isFlattenWrapperElement(element)) {
+      return normalizeValueList(
+        element.valueList.map(child => mergeAreaIntoChild(element, child))
+      )
+    }
+
+    const normalizedChildren = normalizeValueList(element.valueList)
+    if (!element.value && !normalizedChildren.length) {
+      return []
+    }
+
+    return [
+      {
+        ...element,
+        valueList: normalizedChildren
+      }
+    ]
+  })
+}
+
 function createZone(
   key: IZoneModel['key'],
   elementList: IJspdfSourceState['result']['data']['main']
 ): IZoneModel {
-  const blockList: IDocumentBlockNode[] = elementList.map(element => ({
+  const normalizedElementList = normalizeValueList(elementList)
+  const blockList: IDocumentBlockNode[] = normalizedElementList.map(element => ({
     kind: getBlockKind(element),
     element
   }))
 
   return {
     key,
-    elementList,
+    elementList: normalizedElementList,
     blockList,
     height: blockList.length * 24
   }
@@ -59,15 +141,35 @@ function createGraffitiList(source: IJspdfSourceState): IDocumentGraffitiPage[] 
 
 export function normalizeDocument(source: IJspdfSourceState): IDocumentModel {
   const data = source.result.data
+  const badge = source.badge || {
+    main: null,
+    areas: []
+  }
 
   return {
     width: source.options.width,
     height: source.options.height,
     margins: [...source.options.margins],
     scale: source.options.scale,
+    badge: {
+      top: source.options.badge.top,
+      left: source.options.badge.left,
+      main: badge.main
+        ? {
+            ...badge.main
+          }
+        : null,
+      areas: badge.areas.map(areaBadge => ({
+        areaId: areaBadge.areaId,
+        badge: {
+          ...areaBadge.badge
+        }
+      }))
+    },
     defaults: {
       defaultFont: source.options.defaultFont,
       defaultSize: source.options.defaultSize,
+      defaultTabWidth: source.options.defaultTabWidth,
       defaultColor: source.options.defaultColor,
       defaultRowMargin: source.options.defaultRowMargin,
       defaultBasicRowMarginHeight: source.options.defaultBasicRowMarginHeight,
@@ -82,6 +184,12 @@ export function normalizeDocument(source: IJspdfSourceState): IDocumentModel {
         source.options.label.defaultBackgroundColor,
       labelDefaultBorderRadius: source.options.label.defaultBorderRadius,
       labelDefaultPadding: [...source.options.label.defaultPadding],
+      imgCaption: {
+        color: source.options.imgCaption.color,
+        font: source.options.imgCaption.font,
+        size: source.options.imgCaption.size,
+        top: source.options.imgCaption.top
+      },
       pageNumber: {
         bottom: source.options.pageNumber.bottom,
         size: source.options.pageNumber.size,

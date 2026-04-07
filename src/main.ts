@@ -25,6 +25,7 @@ import Editor, {
 import { Dialog } from './components/dialog/Dialog'
 import { formatPrismToken } from './utils/prism'
 import { Signature } from './components/signature/Signature'
+import simsunTtfUrl from './assets/fonts/simsun.ttf'
 import { jspdfPlugin, type CommandWithJspdf } from './plugins/jspdf'
 import { debounce, nextTick, scrollIntoView } from './utils'
 
@@ -65,7 +66,7 @@ window.onload = function () {
   )
   instance.use(jspdfPlugin, {
     fonts: {
-      SimSun: 'https://example.com/fonts/simsun.ttf'
+      SimSun: simsunTtfUrl
     }
   })
   console.log('实例: ', instance)

@@ -1,5 +1,4 @@
 import type jsPDF from 'jspdf'
-import type { IPageModel } from '../model/layout'
 import type { IPdfRasterBlock } from '../types'
 
 function getImageFormat(dataUrl: string): 'PNG' | 'JPEG' | 'WEBP' {
@@ -30,7 +29,10 @@ function loadImage(dataUrl: string): Promise<HTMLImageElement> {
 }
 
 async function resolveRasterData(raster: IPdfRasterBlock) {
-  if (/^data:image\/(png|jpeg|jpg|webp);base64,/.test(raster.dataUrl)) {
+  if (
+    !raster.crop &&
+    /^data:image\/(png|jpeg|jpg|webp);base64,/.test(raster.dataUrl)
+  ) {
     return {
       dataUrl: raster.dataUrl,
       format: getImageFormat(raster.dataUrl)
@@ -51,7 +53,21 @@ async function resolveRasterData(raster: IPdfRasterBlock) {
     )
   }
 
-  ctx.drawImage(image, 0, 0, width, height)
+  if (raster.crop) {
+    ctx.drawImage(
+      image,
+      raster.crop.x,
+      raster.crop.y,
+      raster.crop.width,
+      raster.crop.height,
+      0,
+      0,
+      width,
+      height
+    )
+  } else {
+    ctx.drawImage(image, 0, 0, width, height)
+  }
 
   return {
     dataUrl: canvas.toDataURL('image/png'),
@@ -59,8 +75,31 @@ async function resolveRasterData(raster: IPdfRasterBlock) {
   }
 }
 
-export async function renderImages(doc: jsPDF, page: IPageModel) {
-  for (const raster of page.rasterBlocks) {
+export function partitionRasterBlocksByLayer(rasterList: IPdfRasterBlock[]): {
+  background: IPdfRasterBlock[]
+  content: IPdfRasterBlock[]
+  overlay: IPdfRasterBlock[]
+} {
+  return rasterList.reduce(
+    (result, raster) => {
+      const layer = raster.layer || 'content'
+      result[layer].push(raster)
+      return result
+    },
+    {
+      background: [],
+      content: [],
+      overlay: []
+    } as {
+      background: IPdfRasterBlock[]
+      content: IPdfRasterBlock[]
+      overlay: IPdfRasterBlock[]
+    }
+  )
+}
+
+export async function renderImages(doc: jsPDF, rasterList: IPdfRasterBlock[]) {
+  for (const raster of rasterList) {
     const { dataUrl, format } = await resolveRasterData(raster)
     const gStateCtor = (doc as any).GState
     if (

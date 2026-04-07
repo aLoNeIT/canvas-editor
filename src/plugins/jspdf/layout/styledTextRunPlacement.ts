@@ -1,9 +1,11 @@
+import { RowFlex } from '../../../editor/dataset/enum/Row'
 import type { ITextPlacement } from './textPlacement'
 
 export interface IStyledTextRun {
   text: string
   font: string
   size: number
+  widthOverride?: number
   baselineShift?: number
   letterSpacing?: number
   bold?: boolean
@@ -19,6 +21,7 @@ export interface ICreateStyledTextRunPlacementsOption {
   x: number
   y: number
   width: number
+  rowFlex?: RowFlex
   measureWidth: (
     text: string,
     style?: {
@@ -44,6 +47,7 @@ interface IPlacementSegment extends Omit<IStyledTextRun, 'text' | 'lineHeight'> 
 interface IPlacementLine {
   height: number
   baseline: number
+  justify?: boolean
   segmentList: IPlacementSegment[]
 }
 
@@ -61,6 +65,7 @@ function isSameStyle(
   return (
     left.font === right.font &&
     left.size === right.size &&
+    left.widthOverride === right.widthOverride &&
     left.baselineShift === right.baselineShift &&
     left.letterSpacing === right.letterSpacing &&
     left.bold === right.bold &&
@@ -75,10 +80,11 @@ function pushSegment(
   line: IPlacementLine,
   token: Omit<IPlacementSegment, 'text' | 'width'>,
   text: string,
-  width: number
+  width: number,
+  shouldMerge: boolean
 ) {
   const lastSegment = line.segmentList[line.segmentList.length - 1]
-  if (lastSegment && isSameStyle(lastSegment, token)) {
+  if (shouldMerge && lastSegment && isSameStyle(lastSegment, token)) {
     lastSegment.text += text
     lastSegment.width += width
     return
@@ -100,10 +106,50 @@ function createLine() {
   return line
 }
 
+function shouldMergeSameStyle(rowFlex?: RowFlex) {
+  return rowFlex !== RowFlex.ALIGNMENT && rowFlex !== RowFlex.JUSTIFY
+}
+
+function getLineWidth(line: IPlacementLine) {
+  return line.segmentList.reduce((sum, segment) => sum + segment.width, 0)
+}
+
+function getJustifyGap(
+  line: IPlacementLine,
+  option: Pick<ICreateStyledTextRunPlacementsOption, 'width'>
+) {
+  if (!line.justify || line.segmentList.length < 2) {
+    return 0
+  }
+  const remainingWidth = Math.max(0, option.width - getLineWidth(line))
+  return remainingWidth / (line.segmentList.length - 1)
+}
+
+function getLineOffsetX(
+  line: IPlacementLine,
+  option: Pick<ICreateStyledTextRunPlacementsOption, 'width' | 'rowFlex'>
+) {
+  if (line.justify) {
+    return 0
+  }
+
+  const remainingWidth = Math.max(0, option.width - getLineWidth(line))
+
+  if (option.rowFlex === RowFlex.CENTER) {
+    return remainingWidth / 2
+  }
+  if (option.rowFlex === RowFlex.RIGHT) {
+    return remainingWidth
+  }
+
+  return 0
+}
+
 function flushLine(
   lineList: IPlacementLine[],
   currentLine: IPlacementLine,
-  fallbackRun?: IStyledTextRun
+  fallbackRun?: IStyledTextRun,
+  justify?: boolean
 ) {
   if (!currentLine.segmentList.length && fallbackRun) {
     currentLine.segmentList.push({
@@ -122,6 +168,7 @@ function flushLine(
   }
 
   if (currentLine.segmentList.length) {
+    currentLine.justify = justify
     lineList.push(currentLine)
   }
 }
@@ -141,11 +188,17 @@ export function createStyledTextRunPlacements(
   const lineList: IPlacementLine[] = []
   let currentLine = createLine()
   let currentWidth = 0
+  const shouldMerge = shouldMergeSameStyle(option.rowFlex)
 
   visibleRunList.forEach(run => {
     for (const char of run.text) {
       if (char === '\n') {
-        flushLine(lineList, currentLine, run)
+        flushLine(
+          lineList,
+          currentLine,
+          run,
+          option.rowFlex === RowFlex.JUSTIFY
+        )
         currentLine = createLine()
         currentWidth = 0
         continue
@@ -157,12 +210,19 @@ export function createStyledTextRunPlacements(
         bold: run.bold,
         italic: run.italic
       }) + (run.letterSpacing || 0)
+      const resolvedCharWidth = run.widthOverride ?? charWidth
 
       if (
         currentLine.segmentList.length &&
-        currentWidth + charWidth > option.width
+        currentWidth + resolvedCharWidth > option.width
       ) {
-        flushLine(lineList, currentLine, run)
+        flushLine(
+          lineList,
+          currentLine,
+          run,
+          option.rowFlex === RowFlex.JUSTIFY ||
+            option.rowFlex === RowFlex.ALIGNMENT
+        )
         currentLine = createLine()
         currentWidth = 0
       }
@@ -172,6 +232,7 @@ export function createStyledTextRunPlacements(
         {
           font: run.font,
           size: run.size,
+          widthOverride: run.widthOverride,
           baselineShift: run.baselineShift,
           letterSpacing: run.letterSpacing,
           bold: run.bold,
@@ -181,31 +242,42 @@ export function createStyledTextRunPlacements(
           color: run.color
         },
         char,
-        charWidth
+        resolvedCharWidth,
+        shouldMerge
       )
-      currentWidth += charWidth
+      currentWidth += resolvedCharWidth
       currentLine.height = Math.max(currentLine.height, run.lineHeight)
       currentLine.baseline = Math.max(currentLine.baseline, run.size)
     }
   })
 
-  flushLine(lineList, currentLine, visibleRunList[visibleRunList.length - 1])
+  flushLine(
+    lineList,
+    currentLine,
+    visibleRunList[visibleRunList.length - 1],
+    option.rowFlex === RowFlex.JUSTIFY
+  )
 
   const placementList: ITextPlacement[] = []
   const styledLineList: IStyledTextPlacementLine[] = []
   let cursorY = option.y
   lineList.forEach(line => {
-    let cursorX = option.x
+    const justifyGap = getJustifyGap(line, option)
+    let cursorX = option.x + getLineOffsetX(line, option)
     const linePlacementList: ITextPlacement[] = []
-    line.segmentList.forEach(segment => {
+    line.segmentList.forEach((segment, index) => {
+      const placementWidth =
+        segment.width +
+        (index < line.segmentList.length - 1 ? justifyGap : 0)
       const placement: ITextPlacement = {
         text: segment.text,
         x: cursorX,
         y: cursorY + line.baseline + (segment.baselineShift || 0),
-        width: segment.width,
+        width: placementWidth,
         height: line.height,
         font: segment.font,
         size: segment.size,
+        widthOverride: segment.widthOverride,
         baselineShift: segment.baselineShift,
         letterSpacing: segment.letterSpacing,
         bold: segment.bold,
@@ -217,7 +289,7 @@ export function createStyledTextRunPlacements(
       }
       placementList.push(placement)
       linePlacementList.push(placement)
-      cursorX += segment.width
+      cursorX += placementWidth
     })
     styledLineList.push({
       y: cursorY,

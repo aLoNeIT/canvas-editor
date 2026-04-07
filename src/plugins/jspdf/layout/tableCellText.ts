@@ -21,6 +21,7 @@ export interface ITableCellTextFallbackStyle {
   size?: number
   baselineShift?: number
   letterSpacing?: number
+  tabWidth?: number
   bold?: boolean
   italic?: boolean
   underline?: boolean
@@ -214,6 +215,9 @@ function getControlTextFallbackStyle(
 }
 
 function getSyntheticElementText(element: IElement) {
+  if (element.type === ElementType.TAB) {
+    return ' '
+  }
   if (element.type === ElementType.CHECKBOX) {
     return element.checkbox?.value ? '\u2611' : '\u2610'
   }
@@ -271,6 +275,7 @@ function createRunStyle(
     controlBracketColor: inherited.controlBracketColor,
     controlPrefix: inherited.controlPrefix,
     controlPostfix: inherited.controlPostfix,
+    tabWidth: inherited.tabWidth,
     checkboxGap: inherited.checkboxGap,
     radioGap: inherited.radioGap,
     lineHeight: Math.max(
@@ -289,6 +294,23 @@ export function extractElementTextRuns(
   const runList: IStyledTextRun[] = []
   elementList.forEach(element => {
     const style = createRunStyle(element, inherited)
+    if (element.type === ElementType.TAB) {
+      runList.push({
+        text: ' ',
+        widthOverride: style.tabWidth || 0,
+        font: style.font,
+        size: style.size,
+        baselineShift: style.baselineShift,
+        letterSpacing: style.letterSpacing,
+        bold: style.bold,
+        italic: style.italic,
+        underline: style.underline,
+        strikeout: style.strikeout,
+        color: style.color,
+        lineHeight: style.lineHeight
+      })
+      return
+    }
     const text = element.value || getSyntheticElementText(element)
     if (text) {
       runList.push({

@@ -4,6 +4,7 @@ import type { IDocumentBlockNode, IDocumentModel } from '../model/document'
 import type { IPageModel } from '../model/layout'
 import { measureText } from '../measure/textMeasure'
 import { BlockType } from '../../../editor/dataset/enum/Block'
+import { ImageDisplay } from '../../../editor/dataset/enum/Common'
 import { ElementType } from '../../../editor/dataset/enum/Element'
 import { LineNumberType } from '../../../editor/dataset/enum/LineNumber'
 import {
@@ -37,13 +38,17 @@ import { createTextDecorationLines } from './textDecoration'
 import { paginateTableRows } from './tablePagination'
 import { resolveTableRowHeightList } from './tableMetrics'
 import { createTableCellVisuals } from './tableVisual'
+import { PDF_RENDER_STAGE } from '../render/renderStage'
 import type { IStyledTextPlacementLine } from './styledTextRunPlacement'
+
+const DEFAULT_TAB_WIDTH = 32
 
 interface ITableRowPlacement {
   kind: 'table-row'
   block: IDocumentBlockNode
   height: number
   rowIndex: number
+  forceBreakAfter?: boolean
 }
 
 interface IBlockPlacement {
@@ -51,6 +56,7 @@ interface IBlockPlacement {
   block: IDocumentBlockNode
   height: number
   defaults: IDocumentModel['defaults']
+  forceBreakAfter?: boolean
 }
 
 interface ITextLinePlacement {
@@ -61,6 +67,7 @@ interface ITextLinePlacement {
   height: number
   textStyle: IResolvedBlockTextStyle
   listSemantic: IListBlockSemantics
+  forceBreakAfter?: boolean
 }
 
 type IMainPlacement = ITableRowPlacement | IBlockPlacement | ITextLinePlacement
@@ -89,6 +96,29 @@ interface IControlBorderSegment {
 
 function getTextLineHeight(size: number) {
   return Math.max(24, size + 8)
+}
+
+function isFloatingImageBlock(block: IDocumentBlockNode) {
+  return (
+    block.kind === 'image' &&
+    Boolean(block.element.imgFloatPosition) &&
+    (
+      block.element.imgDisplay === ImageDisplay.SURROUND ||
+      block.element.imgDisplay === ImageDisplay.FLOAT_TOP ||
+      block.element.imgDisplay === ImageDisplay.FLOAT_BOTTOM
+    )
+  )
+}
+
+function getFloatingImagePageNo(block: IDocumentBlockNode) {
+  return block.element.imgFloatPosition?.pageNo ?? 0
+}
+
+function isSurroundImageBlock(block: IDocumentBlockNode) {
+  return (
+    isFloatingImageBlock(block) &&
+    block.element.imgDisplay === ImageDisplay.SURROUND
+  )
 }
 
 function createPage(pageNo: number, documentModel: IDocumentModel): IPageModel {
@@ -137,12 +167,14 @@ function appendFrameDecorations(
     backgroundImagePlacements.forEach(backgroundImagePlacement => {
       page.rasterBlocks.push({
         pageNo: page.pageNo,
-        ...backgroundImagePlacement
+        ...backgroundImagePlacement,
+        layer: 'background'
       })
     })
   } else {
     page.highlightRects.push({
       pageNo: page.pageNo,
+      stage: PDF_RENDER_STAGE.BACKGROUND,
       ...createBackgroundRect({
         pageWidth: page.width,
         pageHeight: page.height,
@@ -169,7 +201,8 @@ function appendFrameDecorations(
     imageWatermarkPlacements.forEach(imageWatermarkPlacement => {
       page.rasterBlocks.push({
         pageNo: page.pageNo,
-        ...imageWatermarkPlacement
+        ...imageWatermarkPlacement,
+        layer: 'background'
       })
     })
   } else {
@@ -218,12 +251,14 @@ function appendFrameDecorations(
     watermarkPlacements.forEach(placement => {
       page.textRuns.push({
         pageNo: page.pageNo,
+        stage: PDF_RENDER_STAGE.BACKGROUND,
         ...placement
       })
     })
     if (watermarkPlacement) {
       page.textRuns.push({
         pageNo: page.pageNo,
+        stage: PDF_RENDER_STAGE.BACKGROUND,
         ...watermarkPlacement
       })
     }
@@ -253,6 +288,7 @@ function appendFrameDecorations(
     if (pageNumberPlacement) {
       page.textRuns.push({
         pageNo: page.pageNo,
+        stage: PDF_RENDER_STAGE.PAGE_NUMBER,
         ...pageNumberPlacement
       })
     }
@@ -279,6 +315,7 @@ function appendFrameDecorations(
     }).forEach(line => {
       page.vectorLines.push({
         pageNo: page.pageNo,
+        stage: PDF_RENDER_STAGE.PAGE_BORDER,
         ...line
       })
     })
@@ -307,10 +344,95 @@ function createMeasureWidth(
     ).width
 }
 
+function truncateTextToWidth(
+  text: string,
+  maxWidth: number,
+  measureWidth: (value: string) => number
+) {
+  if (!text || measureWidth(text) <= maxWidth) {
+    return text
+  }
+
+  const ellipsis = '...'
+  if (measureWidth(ellipsis) >= maxWidth) {
+    return ellipsis
+  }
+
+  let left = 0
+  let right = text.length
+  while (left < right) {
+    const middle = Math.ceil((left + right) / 2)
+    const truncated = `${text.slice(0, middle)}${ellipsis}`
+    if (measureWidth(truncated) <= maxWidth) {
+      left = middle
+    } else {
+      right = middle - 1
+    }
+  }
+
+  return `${text.slice(0, left)}${ellipsis}`
+}
+
+function createImageCaptionPlacement(
+  block: IDocumentBlockNode,
+  x: number,
+  y: number,
+  width: number,
+  imageHeight: number,
+  documentModel: IDocumentModel,
+  imageNo?: number
+) {
+  const caption = block.element.imgCaption
+  if (!caption?.value) {
+    return null
+  }
+
+  const font = caption.font || documentModel.defaults.imgCaption.font
+  const size = caption.size || documentModel.defaults.imgCaption.size
+  const color = caption.color || documentModel.defaults.imgCaption.color
+  const top = caption.top ?? documentModel.defaults.imgCaption.top
+  const rawText =
+    typeof imageNo === 'number'
+      ? caption.value.replace(/\{imageNo\}/g, String(imageNo))
+      : caption.value
+  const measureWidth = createMeasureWidth(font, size)
+  const text = truncateTextToWidth(rawText, width, measureWidth)
+  const textWidth = measureWidth(text)
+
+  return {
+    text,
+    x: x + Math.max(0, (width - textWidth) / 2),
+    y: y + imageHeight + top + size,
+    width: textWidth,
+    height: size,
+    font,
+    size,
+    color
+  }
+}
+
+function getImageBlockHeight(
+  block: IDocumentBlockNode,
+  documentModel: IDocumentModel
+) {
+  const imageHeight = block.element.height || block.height || 120
+  if (!block.element.imgCaption?.value) {
+    return imageHeight
+  }
+
+  const captionSize =
+    block.element.imgCaption.size || documentModel.defaults.imgCaption.size
+  const captionTop =
+    block.element.imgCaption.top ?? documentModel.defaults.imgCaption.top
+
+  return imageHeight + captionTop + captionSize
+}
+
 function collectAreaDecorationSegment(
   areaSegmentMap: Map<string, IAreaDecorationSegment>,
   placement: IMainPlacement,
-  top: number
+  top: number,
+  height = placement.height
 ) {
   const areaId = placement.block.element.areaId
   const area = placement.block.element.area
@@ -322,7 +444,7 @@ function collectAreaDecorationSegment(
   }
 
   const segment = areaSegmentMap.get(areaId)
-  const bottom = top + placement.height
+  const bottom = top + height
   if (segment) {
     segment.top = Math.min(segment.top, top)
     segment.bottom = Math.max(segment.bottom, bottom)
@@ -349,6 +471,7 @@ function appendAreaDecorations(
     if (segment.backgroundColor) {
       page.highlightRects.push({
         pageNo: page.pageNo,
+        stage: PDF_RENDER_STAGE.BACKGROUND,
         x: contentX,
         y: segment.top,
         width: contentWidth,
@@ -368,10 +491,63 @@ function appendAreaDecorations(
       }).forEach(line => {
         page.vectorLines.push({
           pageNo: page.pageNo,
+          stage: PDF_RENDER_STAGE.BACKGROUND,
           ...line
         })
       })
     }
+  })
+}
+
+function appendBadges(
+  page: IPageModel,
+  documentModel: IDocumentModel,
+  areaSegmentMap: Map<string, IAreaDecorationSegment>,
+  mainTop: number
+) {
+  if (!documentModel.badge) {
+    return
+  }
+
+  const scale = documentModel.scale || 1
+  const defaultTop = documentModel.badge.top
+  const defaultLeft = documentModel.badge.left
+
+  if (page.pageNo === 0 && documentModel.badge.main) {
+    const badge = documentModel.badge.main
+    page.rasterBlocks.push({
+      pageNo: page.pageNo,
+      stage: PDF_RENDER_STAGE.BADGE,
+      x: (badge.left ?? defaultLeft) * scale,
+      y: (badge.top ?? defaultTop) * scale + mainTop,
+      width: badge.width * scale,
+      height: badge.height * scale,
+      dataUrl: badge.value,
+      sourceType: 'badge',
+      layer: 'overlay',
+      debugLabel: 'badge:main'
+    })
+  }
+
+  documentModel.badge.areas.forEach(areaBadge => {
+    const segment = areaSegmentMap.get(areaBadge.areaId)
+    if (!segment) {
+      return
+    }
+
+    const badge = areaBadge.badge
+    page.rasterBlocks.push({
+      pageNo: page.pageNo,
+      stage: PDF_RENDER_STAGE.BADGE,
+      x: (badge.left ?? defaultLeft) * scale,
+      y: (badge.top ?? defaultTop) * scale + segment.top,
+      width: badge.width * scale,
+      height: badge.height * scale,
+      dataUrl: badge.value,
+      sourceType: 'badge',
+      layer: 'overlay',
+      debugLabel: `badge:${areaBadge.areaId}`
+    })
   })
 }
 
@@ -390,6 +566,7 @@ function appendGraffiti(page: IPageModel, documentModel: IDocumentModel) {
     for (let index = 0; index + 3 < stroke.points.length; index += 2) {
       page.vectorLines.push({
         pageNo: page.pageNo,
+        stage: PDF_RENDER_STAGE.GRAFFITI,
         x1: stroke.points[index] * scale,
         y1: stroke.points[index + 1] * scale,
         x2: stroke.points[index + 2] * scale,
@@ -399,6 +576,173 @@ function appendGraffiti(page: IPageModel, documentModel: IDocumentModel) {
       })
     }
   })
+}
+
+function appendFloatingImages(
+  page: IPageModel,
+  blockList: IDocumentBlockNode[],
+  documentModel: IDocumentModel,
+  imageNumberMap: Map<IDocumentBlockNode, number>,
+  zoneKey: 'header' | 'main' | 'footer'
+) {
+  blockList.forEach(block => {
+    if (!isFloatingImageBlock(block)) {
+      return
+    }
+    if (
+      zoneKey === 'main' &&
+      getFloatingImagePageNo(block) !== page.pageNo
+    ) {
+      return
+    }
+
+    const x = block.element.imgFloatPosition!.x
+    const y = block.element.imgFloatPosition!.y
+    const width = block.element.width || 0
+    const height = block.element.height || 0
+    if (!width || !height) {
+      return
+    }
+
+    page.rasterBlocks.push({
+      pageNo: page.pageNo,
+      stage:
+        block.element.imgDisplay === ImageDisplay.FLOAT_BOTTOM
+          ? PDF_RENDER_STAGE.FLOAT_BOTTOM
+          : PDF_RENDER_STAGE.FLOAT_OVERLAY,
+      x,
+      y,
+      width,
+      height,
+      dataUrl: block.element.value || '',
+      crop: block.element.imgCrop,
+      sourceType: 'image',
+      layer:
+        block.element.imgDisplay === ImageDisplay.FLOAT_TOP ||
+        block.element.imgDisplay === ImageDisplay.SURROUND
+          ? 'overlay'
+          : 'content'
+    })
+
+    const captionPlacement = createImageCaptionPlacement(
+      block,
+      x,
+      y,
+      width,
+      height,
+      documentModel,
+      imageNumberMap.get(block)
+    )
+    if (captionPlacement) {
+      page.textRuns.push({
+        pageNo: page.pageNo,
+        stage:
+          block.element.imgDisplay === ImageDisplay.FLOAT_BOTTOM
+            ? PDF_RENDER_STAGE.FLOAT_BOTTOM
+            : PDF_RENDER_STAGE.FLOAT_OVERLAY,
+        ...captionPlacement
+      })
+    }
+  })
+}
+
+function getStyledTextLineWidth(line: IStyledTextPlacementLine) {
+  return line.placementList.reduce((maxWidth, placement) => {
+    const right =
+      placement.x + (placement.widthOverride ?? placement.width)
+    return Math.max(maxWidth, right)
+  }, 0)
+}
+
+function resolveSurroundTextLinePlacement(
+  pageNo: number,
+  placement: ITextLinePlacement,
+  x: number,
+  y: number,
+  width: number,
+  blockList: IDocumentBlockNode[]
+) {
+  const rowMargin = placement.textStyle.rowMargin
+  const contentRight = x + width
+  let renderX = x
+  let renderY = y
+  let extraHeight = 0
+
+  while (true) {
+    const lineTop = renderY + rowMargin
+    const lineBottom = lineTop + placement.line.height
+    const lineWidth = getStyledTextLineWidth(placement.line)
+    let nextX = x
+    let nextY = renderY
+
+    for (const block of blockList) {
+      if (!isSurroundImageBlock(block)) {
+        continue
+      }
+      if (getFloatingImagePageNo(block) !== pageNo) {
+        continue
+      }
+
+      const imageTop = block.element.imgFloatPosition!.y
+      const imageRight =
+        block.element.imgFloatPosition!.x + (block.element.width || 0)
+      const imageBottom = imageTop + (block.element.height || 0)
+      const intersectsY = lineBottom > imageTop && lineTop < imageBottom
+      if (!intersectsY) {
+        continue
+      }
+
+      if (imageRight + lineWidth <= contentRight) {
+        nextX = Math.max(nextX, imageRight)
+        continue
+      }
+
+      nextY = Math.max(nextY, imageBottom - rowMargin)
+    }
+
+    if (nextY > renderY) {
+      extraHeight += nextY - renderY
+      renderY = nextY
+      renderX = x
+      continue
+    }
+
+    renderX = nextX
+    break
+  }
+
+  return {
+    x: renderX,
+    y: renderY,
+    consumedHeight: placement.height + extraHeight
+  }
+}
+
+interface IAppendPlacementResult {
+  renderX: number
+  renderY: number
+  consumedHeight: number
+}
+
+function getRequiredPageCount(
+  documentModel: IDocumentModel,
+  flowPageCount: number
+) {
+  const floatingImagePageCount = documentModel.main.blockList.reduce(
+    (maxPageCount, block) => {
+      if (!isFloatingImageBlock(block)) {
+        return maxPageCount
+      }
+      return Math.max(maxPageCount, getFloatingImagePageNo(block) + 1)
+    },
+    0
+  )
+  const graffitiPageCount = (documentModel.graffiti || []).reduce(
+    (maxPageCount, page) => Math.max(maxPageCount, page.pageNo + 1),
+    0
+  )
+
+  return Math.max(flowPageCount, floatingImagePageCount, graffitiPageCount, 1)
 }
 
 function collectControlBorderSegment(
@@ -440,7 +784,8 @@ function collectControlBorderSegment(
 function appendControlBorders(
   page: IPageModel,
   controlBorderSegmentMap: Map<IDocumentBlockNode, IControlBorderSegment>,
-  documentModel: IDocumentModel
+  documentModel: IDocumentModel,
+  stage: number = PDF_RENDER_STAGE.CONTENT
 ) {
   const borderWidth = documentModel.defaults.control?.borderWidth || 1
   const borderColor = documentModel.defaults.control?.borderColor || '#000000'
@@ -456,6 +801,7 @@ function appendControlBorders(
     }).forEach(line => {
       page.vectorLines.push({
         pageNo: page.pageNo,
+        stage,
         ...line
       })
     })
@@ -512,6 +858,8 @@ function createResolvedTextLayout(
     fallbackBold: textStyle.bold,
     fallbackItalic: textStyle.italic,
     fallbackLineHeight: textStyle.lineHeight,
+    fallbackTabWidth:
+      documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH,
     fallbackControlPlaceholderColor:
       documentModel.defaults.control?.placeholderColor,
     fallbackControlBracketColor: documentModel.defaults.control?.bracketColor,
@@ -550,7 +898,8 @@ function getTableColumnCount(block: IDocumentBlockNode) {
 
 function getResolvedTableRowHeightList(
   block: IDocumentBlockNode,
-  width: number
+  width: number,
+  documentModel: IDocumentModel
 ) {
   const rowList = layoutTable(block)
   const columnWidthList = getTableColumnWidthList(block, width)
@@ -565,7 +914,8 @@ function getResolvedTableRowHeightList(
         style?.bold,
         style?.italic
       ).width,
-    lineHeight: getTextLineHeight(12)
+    lineHeight: getTextLineHeight(12),
+    tabWidth: documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH
   })
 }
 
@@ -574,15 +924,22 @@ function getBlockLayoutHeight(
   width: number,
   documentModel: IDocumentModel
 ) {
+  if (block.element.type === ElementType.PAGE_BREAK) {
+    return 0
+  }
+
   if (block.kind === 'table') {
     const rows = layoutTable(block)
     if (!rows.length) return 24
-    return getResolvedTableRowHeightList(block, width)
+    return getResolvedTableRowHeightList(block, width, documentModel)
       .reduce((sum, rowHeight) => sum + rowHeight, 0)
   }
 
   if (block.kind === 'image') {
-    return block.element.height || block.height || 120
+    if (isFloatingImageBlock(block)) {
+      return 0
+    }
+    return getImageBlockHeight(block, documentModel)
   }
 
   if (block.element.type === ElementType.LABEL) {
@@ -623,6 +980,8 @@ function getBlockLayoutHeight(
     fallbackBold: textStyle.bold,
     fallbackItalic: textStyle.italic,
     fallbackLineHeight: textStyle.lineHeight,
+    fallbackTabWidth:
+      documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH,
     fallbackControlPlaceholderColor:
       documentModel.defaults.control?.placeholderColor,
     fallbackControlBracketColor: documentModel.defaults.control?.bracketColor,
@@ -651,6 +1010,17 @@ function collectMainPlacements(
 ): IMainPlacement[] {
   const listSemanticMap = createZoneListSemanticMap(blockList, documentModel)
   return blockList.reduce<IMainPlacement[]>((placementList, block) => {
+    if (block.element.type === ElementType.PAGE_BREAK) {
+      placementList.push({
+        kind: 'block',
+        block,
+        height: 0,
+        defaults: documentModel.defaults,
+        forceBreakAfter: true
+      })
+      return placementList
+    }
+
     if (
       block.kind === 'paragraph' ||
       block.kind === 'control'
@@ -697,7 +1067,11 @@ function collectMainPlacements(
     }
 
     const rows = layoutTable(block)
-    const rowHeightList = getResolvedTableRowHeightList(block, width)
+    const rowHeightList = getResolvedTableRowHeightList(
+      block,
+      width,
+      documentModel
+    )
     if (!rows.length) {
       placementList.push({
         kind: 'block',
@@ -733,13 +1107,15 @@ function appendPlacementTextRuns(
   block: IDocumentBlockNode,
   placementList: IStyledTextPlacementLine['placementList'],
   x: number,
-  y: number
+  y: number,
+  stage: number = PDF_RENDER_STAGE.CONTENT
 ) {
   if (!placementList.length) return
 
   createTextDecorationLines(placementList).forEach(line => {
     page.vectorLines.push({
       pageNo: page.pageNo,
+      stage,
       x1: x + line.x1,
       y1: y + line.y1,
       x2: x + line.x2,
@@ -768,13 +1144,15 @@ function appendPlacementTextRuns(
 
     page.textRuns.push({
       pageNo: page.pageNo,
+      stage,
       text: line.text,
       x: x + line.x,
       y: y + line.y,
-      width: Math.min(measured.width, line.width),
+      width: line.widthOverride ?? Math.min(measured.width, line.width),
       height: measured.ascent + measured.descent,
       font: line.font,
       size: line.size,
+      letterSpacing: line.letterSpacing,
       bold: line.bold,
       italic: line.italic,
       color: line.color
@@ -783,9 +1161,10 @@ function appendPlacementTextRuns(
     if (block.element.highlight) {
       page.highlightRects.push({
         pageNo: page.pageNo,
+        stage,
         x: x + line.x,
         y: y + line.y - measured.ascent,
-        width: Math.min(measured.width, line.width),
+        width: line.widthOverride ?? Math.min(measured.width, line.width),
         height: measured.ascent + measured.descent,
         color: block.element.highlight,
         opacity: 0.35
@@ -797,6 +1176,7 @@ function appendPlacementTextRuns(
     placementList.forEach(line => {
       page.links.push({
         pageNo: page.pageNo,
+        stage,
         x: x + line.x,
         y: y + line.y - line.baselineOffset,
         width: line.width,
@@ -815,7 +1195,8 @@ function appendResolvedTextLine(
   listSemantic: IListBlockSemantics,
   x: number,
   y: number,
-  lineIndex: number
+  lineIndex: number,
+  stage: number = PDF_RENDER_STAGE.CONTENT
 ) {
   const lineY = y + textStyle.rowMargin
   if (lineIndex === 0) {
@@ -827,10 +1208,10 @@ function appendResolvedTextLine(
       baselineOffset: line.baselineOffset
     })
     if (markerPlacement) {
-      appendPlacementTextRuns(page, block, [markerPlacement], x, lineY)
+      appendPlacementTextRuns(page, block, [markerPlacement], x, lineY, stage)
     }
   }
-  appendPlacementTextRuns(page, block, line.placementList, x, lineY)
+  appendPlacementTextRuns(page, block, line.placementList, x, lineY, stage)
 }
 
 function appendTableRow(
@@ -839,7 +1220,9 @@ function appendTableRow(
   rowIndex: number,
   x: number,
   y: number,
-  width: number
+  width: number,
+  documentModel: IDocumentModel,
+  stage: number = PDF_RENDER_STAGE.CONTENT
 ) {
   const rowList = layoutTable(block)
   const row = rowList[rowIndex]
@@ -847,7 +1230,11 @@ function appendTableRow(
 
   const columnCount = getTableColumnCount(block)
   const columnWidthList = getTableColumnWidthList(block, width)
-  const rowHeightList = getResolvedTableRowHeightList(block, width)
+  const rowHeightList = getResolvedTableRowHeightList(
+    block,
+    width,
+    documentModel
+  )
   const rowCount = rowList.length
 
   row.tdList.forEach(td => {
@@ -883,6 +1270,7 @@ function appendTableRow(
     visuals.backgroundRects.forEach(rect => {
       page.highlightRects.push({
         pageNo: page.pageNo,
+        stage,
         x: rect.x,
         y: rect.y,
         width: rect.width,
@@ -895,6 +1283,7 @@ function appendTableRow(
     visuals.lines.forEach(line => {
       page.vectorLines.push({
         pageNo: page.pageNo,
+        stage,
         ...line
       })
     })
@@ -908,6 +1297,7 @@ function appendTableRow(
       font: 'Song',
       size: 12,
       lineHeight: getTextLineHeight(12),
+      tabWidth: documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH,
       color: '#000000',
       measureWidth: (value, style) =>
         measureText(
@@ -922,6 +1312,7 @@ function appendTableRow(
     createTextDecorationLines(cellLineList).forEach(line => {
       page.vectorLines.push({
         pageNo: page.pageNo,
+        stage,
         ...line
       })
     })
@@ -929,6 +1320,7 @@ function appendTableRow(
     cellLineList.forEach(line => {
       page.textRuns.push({
         pageNo: page.pageNo,
+        stage,
         text: line.text,
         x: line.x,
         y: line.y,
@@ -939,7 +1331,7 @@ function appendTableRow(
         bold: line.bold,
         italic: line.italic,
         color: line.color
-        })
+      })
     })
   })
 }
@@ -949,14 +1341,20 @@ function getTableRowBaseline(
   rowIndex: number,
   x: number,
   y: number,
-  width: number
+  width: number,
+  documentModel: IDocumentModel
 ) {
   const rowList = layoutTable(block)
   const row = rowList[rowIndex]
   if (!row) return null
 
   const columnWidthList = getTableColumnWidthList(block, width)
-  const rowHeightList = getResolvedTableRowHeightList(block, width)
+  const rowHeightList = getResolvedTableRowHeightList(
+    block,
+    width,
+    documentModel
+  )
+
   const baselineList: number[] = []
 
   row.tdList.forEach(td => {
@@ -982,6 +1380,7 @@ function getTableRowBaseline(
       font: 'Song',
       size: 12,
       lineHeight: getTextLineHeight(12),
+      tabWidth: documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH,
       color: '#000000',
       measureWidth: (value, style) =>
         measureText(
@@ -1003,14 +1402,22 @@ function resolveMainPlacementLineNumberBaseline(
   placement: IMainPlacement,
   x: number,
   y: number,
-  width: number
+  width: number,
+  documentModel: IDocumentModel
 ) {
   if (placement.kind === 'text-line') {
     return y + placement.textStyle.rowMargin + placement.line.baselineOffset
   }
 
   if (placement.kind === 'table-row') {
-    return getTableRowBaseline(placement.block, placement.rowIndex, x, y, width)
+    return getTableRowBaseline(
+      placement.block,
+      placement.rowIndex,
+      x,
+      y,
+      width,
+      documentModel
+    )
   }
 
   if (placement.block.element.type === ElementType.LABEL) {
@@ -1040,7 +1447,8 @@ async function appendImageOrFallback(
   x: number,
   y: number,
   width: number,
-  height: number
+  height: number,
+  stage: number = PDF_RENDER_STAGE.CONTENT
 ) {
   const pendingIssue =
     block.kind === 'latex'
@@ -1062,12 +1470,15 @@ async function appendImageOrFallback(
   if (block.kind === 'image' && isImageSource) {
     page.rasterBlocks.push({
       pageNo: page.pageNo,
+      stage,
       x,
       y,
       width: block.element.width || width,
       height: block.element.height || height,
       dataUrl: value,
-      sourceType: 'image'
+      crop: block.element.imgCrop,
+      sourceType: 'image',
+      layer: 'content'
     })
     return
   }
@@ -1085,6 +1496,7 @@ async function appendImageOrFallback(
   resolveFallback(page, {
     ...fallback,
     pageNo: page.pageNo,
+    stage,
     x,
     y,
     width,
@@ -1097,30 +1509,68 @@ async function appendPlacement(
   placement: IMainPlacement,
   x: number,
   y: number,
-  width: number
-) {
+  width: number,
+  documentModel: IDocumentModel,
+  imageNumberMap: Map<IDocumentBlockNode, number>
+): Promise<IAppendPlacementResult> {
   if (placement.kind === 'table-row') {
-    appendTableRow(page, placement.block, placement.rowIndex, x, y, width)
-    return
+    appendTableRow(
+      page,
+      placement.block,
+      placement.rowIndex,
+      x,
+      y,
+      width,
+      documentModel
+    )
+    return {
+      renderX: x,
+      renderY: y,
+      consumedHeight: placement.height
+    }
+  }
+
+  if (placement.block.element.type === ElementType.PAGE_BREAK) {
+    return {
+      renderX: x,
+      renderY: y,
+      consumedHeight: placement.height
+    }
   }
 
   if (placement.kind === 'text-line') {
+    const surroundPlacement = resolveSurroundTextLinePlacement(
+      page.pageNo,
+      placement,
+      x,
+      y,
+      width,
+      documentModel.main.blockList
+    )
     appendResolvedTextLine(
       page,
       placement.block,
       placement.line,
       placement.textStyle,
       placement.listSemantic,
-      x,
-      y,
+      surroundPlacement.x,
+      surroundPlacement.y,
       placement.lineIndex
     )
-    return
+    return {
+      renderX: surroundPlacement.x,
+      renderY: surroundPlacement.y,
+      consumedHeight: surroundPlacement.consumedHeight
+    }
   }
 
   if (placement.block.kind === 'table') {
-    appendTableRow(page, placement.block, 0, x, y, width)
-    return
+    appendTableRow(page, placement.block, 0, x, y, width, documentModel)
+    return {
+      renderX: x,
+      renderY: y,
+      consumedHeight: placement.height
+    }
   }
 
   if (placement.block.element.type === ElementType.SEPARATOR) {
@@ -1135,7 +1585,11 @@ async function appendPlacement(
         y: y + placement.height / 2
       })
     })
-    return
+    return {
+      renderX: x,
+      renderY: y,
+      consumedHeight: placement.height
+    }
   }
 
   if (placement.block.element.type === ElementType.LABEL) {
@@ -1159,37 +1613,83 @@ async function appendPlacement(
       ...label.backgroundRect
     })
     appendPlacementTextRuns(page, placement.block, [label.textPlacement], 0, 0)
-    return
+    return {
+      renderX: x,
+      renderY: y,
+      consumedHeight: placement.height
+    }
   }
 
   if (placement.block.kind === 'image') {
+    if (isFloatingImageBlock(placement.block)) {
+      return {
+        renderX: x,
+        renderY: y,
+        consumedHeight: placement.height
+      }
+    }
+    const imageWidth = Math.min(width, placement.block.element.width || width)
+    const imageHeight = placement.block.element.height || placement.height
     await appendImageOrFallback(
       page,
       placement.block,
       x,
       y,
-      Math.min(width, placement.block.element.width || width),
-      placement.block.element.height || placement.height
+      imageWidth,
+      imageHeight
     )
-    return
+    const captionPlacement = createImageCaptionPlacement(
+      placement.block,
+      x,
+      y,
+      imageWidth,
+      imageHeight,
+      documentModel,
+      imageNumberMap.get(placement.block)
+    )
+    if (captionPlacement) {
+      page.textRuns.push({
+        pageNo: page.pageNo,
+        ...captionPlacement
+      })
+    }
+    return {
+      renderX: x,
+      renderY: y,
+      consumedHeight: placement.height
+    }
   }
 
   if (placement.block.kind === 'control') {
-    await appendImageOrFallback(page, placement.block, x, y, width, placement.height)
-    return
+    return {
+      renderX: x,
+      renderY: y,
+      consumedHeight: placement.height
+    }
   }
 
   await appendImageOrFallback(page, placement.block, x, y, width, placement.height)
+  return {
+    renderX: x,
+    renderY: y,
+    consumedHeight: placement.height
+  }
 }
 
 async function appendStaticZone(
   page: IPageModel,
   documentModel: IDocumentModel,
+  zoneKey: 'header' | 'footer',
   blockList: IDocumentBlockNode[],
   x: number,
   startY: number,
-  width: number
+  width: number,
+  imageNumberMap: Map<IDocumentBlockNode, number>
 ) {
+  const stage =
+    zoneKey === 'header'
+      ? PDF_RENDER_STAGE.HEADER
+      : PDF_RENDER_STAGE.FOOTER
   const listSemanticMap = createZoneListSemanticMap(blockList, documentModel)
   const controlBorderSegmentMap = new Map<IDocumentBlockNode, IControlBorderSegment>()
   let cursorY = startY
@@ -1213,9 +1713,10 @@ async function appendStaticZone(
         })
         page.highlightRects.push({
           pageNo: page.pageNo,
+          stage,
           ...label.backgroundRect
         })
-        appendPlacementTextRuns(page, block, [label.textPlacement], 0, 0)
+        appendPlacementTextRuns(page, block, [label.textPlacement], 0, 0, stage)
         cursorY += label.height
         continue
       }
@@ -1227,6 +1728,7 @@ async function appendStaticZone(
         ).rowMargin
         page.vectorLines.push({
           pageNo: page.pageNo,
+          stage,
           ...createSeparatorVectorLine({
             element: {
               ...block.element,
@@ -1237,6 +1739,10 @@ async function appendStaticZone(
           })
         })
         cursorY += rowMargin * 2 + (block.element.lineWidth || 1)
+        continue
+      }
+
+      if (block.element.type === ElementType.PAGE_BREAK) {
         continue
       }
 
@@ -1255,7 +1761,8 @@ async function appendStaticZone(
           resolved.listSemantic,
           x,
           cursorY,
-          lineIndex
+          lineIndex,
+          stage
         )
         if (block.kind === 'control' && block.element.control?.border) {
           const left = x + Math.min(...line.placementList.map(item => item.x))
@@ -1281,17 +1788,6 @@ async function appendStaticZone(
         cursorY += line.height + resolved.textStyle.rowMargin * 2
       })
       if (!resolved.lineList.length) {
-        if (block.kind === 'control') {
-          // eslint-disable-next-line no-await-in-loop
-          await appendImageOrFallback(
-            page,
-            block,
-            x,
-            cursorY,
-            width,
-            resolved.height
-          )
-        }
         cursorY += resolved.height
       }
       continue
@@ -1299,32 +1795,75 @@ async function appendStaticZone(
 
     if (block.kind === 'table') {
       const rowList = layoutTable(block)
-      const rowHeightList = getResolvedTableRowHeightList(block, width)
+      const rowHeightList = getResolvedTableRowHeightList(
+        block,
+        width,
+        documentModel
+      )
       rowList.forEach(row => {
-        appendTableRow(page, block, row.rowIndex, x, cursorY, width)
+        appendTableRow(
+          page,
+          block,
+          row.rowIndex,
+          x,
+          cursorY,
+          width,
+          documentModel,
+          stage
+        )
         cursorY += rowHeightList[row.rowIndex] || 24
       })
       continue
     }
 
     if (block.kind === 'image') {
-      page.rasterBlocks.push({
-        pageNo: page.pageNo,
+      if (isFloatingImageBlock(block)) {
+        continue
+      }
+      const imageWidth = Math.min(width, block.element.width || width)
+      const imageHeight = block.element.height || 120
+      await appendImageOrFallback(
+        page,
+        block,
         x,
-        y: cursorY,
-        width: Math.min(width, block.element.width || width),
-        height: block.element.height || 120,
-        dataUrl: block.element.value || '',
-        sourceType: 'image'
-      })
-      cursorY += block.element.height || 120
+        cursorY,
+        imageWidth,
+        imageHeight,
+        stage
+      )
+      const captionPlacement = createImageCaptionPlacement(
+        block,
+        x,
+        cursorY,
+        imageWidth,
+        imageHeight,
+        documentModel,
+        imageNumberMap.get(block)
+      )
+      if (captionPlacement) {
+        page.textRuns.push({
+          pageNo: page.pageNo,
+          stage,
+          ...captionPlacement
+        })
+      }
+      cursorY += getImageBlockHeight(block, documentModel)
       continue
     }
 
+    await appendImageOrFallback(
+      page,
+      block,
+      x,
+      cursorY,
+      width,
+      getBlockLayoutHeight(block, width, documentModel),
+      stage
+    )
     cursorY += getBlockLayoutHeight(block, width, documentModel)
   }
 
-  appendControlBorders(page, controlBorderSegmentMap, documentModel)
+  appendControlBorders(page, controlBorderSegmentMap, documentModel, stage)
 }
 
 export async function layoutDocument(
@@ -1341,12 +1880,25 @@ export async function layoutDocument(
     documentModel
   )
   const placementIndexes = paginateHeights(
-    placements.map(placement => placement.height),
+    placements.map(placement => ({
+      height: placement.height,
+      forceBreakAfter: placement.forceBreakAfter
+    })),
     mainPageHeight
   )
 
-  const pageCount = Math.max(1, placementIndexes.length)
+  const pageCount = getRequiredPageCount(documentModel, placementIndexes.length)
   const pageList: IPageModel[] = []
+  const imageNumberMap = new Map<IDocumentBlockNode, number>()
+  let imageNo = 1
+  documentModel.main.blockList.forEach(block => {
+    if (block.kind !== 'image') {
+      return
+    }
+
+    imageNumberMap.set(block, imageNo)
+    imageNo += 1
+  })
   const backgroundImageSize =
     documentModel.defaults.backgroundImage
       ? await resolveImageSize(documentModel.defaults.backgroundImage)
@@ -1365,18 +1917,22 @@ export async function layoutDocument(
     await appendStaticZone(
       page,
       documentModel,
+      'header',
       documentModel.header.blockList,
       documentModel.margins[3],
       frame.headerTop,
-      contentWidth
+      contentWidth,
+      imageNumberMap
     )
     await appendStaticZone(
       page,
       documentModel,
+      'footer',
       documentModel.footer.blockList,
       documentModel.margins[3],
       frame.footerTop,
-      contentWidth
+      contentWidth,
+      imageNumberMap
     )
 
     let cursorY = frame.mainTop
@@ -1388,30 +1944,38 @@ export async function layoutDocument(
       const placement = placements[index]
       if (!placement) continue
       // eslint-disable-next-line no-await-in-loop
-      await appendPlacement(
+      const placementResult = await appendPlacement(
         page,
         placement,
         documentModel.margins[3],
         cursorY,
-        contentWidth
+        contentWidth,
+        documentModel,
+        imageNumberMap
       )
-      collectAreaDecorationSegment(areaSegmentMap, placement, cursorY)
+      collectAreaDecorationSegment(
+        areaSegmentMap,
+        placement,
+        cursorY,
+        placementResult.consumedHeight
+      )
       collectControlBorderSegment(
         controlBorderSegmentMap,
         placement,
-        documentModel.margins[3],
-        cursorY
+        placementResult.renderX,
+        placementResult.renderY
       )
       const baselineY = resolveMainPlacementLineNumberBaseline(
         placement,
-        documentModel.margins[3],
-        cursorY,
-        contentWidth
+        placementResult.renderX,
+        placementResult.renderY,
+        contentWidth,
+        documentModel
       )
       if (typeof baselineY === 'number') {
         lineNumberBaselineList.push(baselineY)
       }
-      cursorY += placement.height
+      cursorY += placementResult.consumedHeight
     }
 
     appendAreaDecorations(
@@ -1421,6 +1985,28 @@ export async function layoutDocument(
       contentWidth
     )
     appendControlBorders(page, controlBorderSegmentMap, documentModel)
+    appendFloatingImages(
+      page,
+      documentModel.header.blockList,
+      documentModel,
+      imageNumberMap,
+      'header'
+    )
+    appendFloatingImages(
+      page,
+      documentModel.main.blockList,
+      documentModel,
+      imageNumberMap,
+      'main'
+    )
+    appendFloatingImages(
+      page,
+      documentModel.footer.blockList,
+      documentModel,
+      imageNumberMap,
+      'footer'
+    )
+    appendBadges(page, documentModel, areaSegmentMap, frame.mainTop)
     appendGraffiti(page, documentModel)
 
     if (
@@ -1443,6 +2029,7 @@ export async function layoutDocument(
       }).forEach(placement => {
         page.textRuns.push({
           pageNo: page.pageNo,
+          stage: PDF_RENDER_STAGE.LINE_NUMBER,
           ...placement
         })
       })
