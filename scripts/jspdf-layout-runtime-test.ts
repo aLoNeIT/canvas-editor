@@ -6179,6 +6179,101 @@ async function testLayoutDocumentSplitsTextAcrossTwoSurroundImages() {
   }
 }
 
+async function testLayoutDocumentMovesSurroundPushedLineToNextPage() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                value: 'aa'
+              },
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,surround-page-break',
+                width: 60,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 25,
+                  y: 56
+                }
+              },
+              {
+                value: 'cccccccc'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...createRuntimeSourceOptions(),
+          height: 90
+        }
+      } as any)
+    )
+
+    assert.equal(pageList.length, 2)
+    assert.deepEqual(
+      pageList.map(page =>
+        page.textRuns.map(({ text, x, y }) => ({
+          text,
+          x,
+          y
+        }))
+      ),
+      [
+        [
+          {
+            text: 'aa',
+            x: 10,
+            y: 20
+          }
+        ],
+        [
+          {
+            text: 'cccccccc',
+            x: 10,
+            y: 20
+          }
+        ]
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentRepeatsHeaderAndFooterFloatingImages() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -8057,6 +8152,7 @@ async function run() {
   await testLayoutDocumentSplitsListItemAroundSurroundImage()
   await testLayoutDocumentContinuesSurroundSplitAcrossStackedImages()
   await testLayoutDocumentSplitsTextAcrossTwoSurroundImages()
+  await testLayoutDocumentMovesSurroundPushedLineToNextPage()
   await testLayoutDocumentRepeatsHeaderAndFooterFloatingImages()
   await testLayoutDocumentAssignsCoreDrawStages()
   await testLayoutDocumentAssignsHeaderFooterAndPageNumberStages()

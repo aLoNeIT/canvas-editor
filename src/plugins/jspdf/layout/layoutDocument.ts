@@ -27,13 +27,12 @@ import {
   createWatermarkPlacements
 } from './framePlacement'
 import { getBlockHeight } from './layoutBlock'
-import { layoutFrame } from './layoutFrame'
+import { layoutFrame, type IFrameLayoutResult } from './layoutFrame'
 import { layoutInline } from './layoutInline'
 import { createLabelPlacement } from './labelPlacement'
 import { resolveImageSize } from './imageSize'
 import { createSeparatorVectorLine } from './separatorPlacement'
 import { getTableColumnWidthList, layoutTable } from './layoutTable'
-import { paginateHeights } from './paginate'
 import { createTableCellTextPlacements } from './tableCellPlacement'
 import { createTextDecorationLines } from './textDecoration'
 import { paginateTableRows } from './tablePagination'
@@ -1170,6 +1169,110 @@ function getRequiredPageCount(
   return Math.max(flowPageCount, floatingImagePageCount, graffitiPageCount, 1)
 }
 
+function measurePlacementConsumedHeight(
+  pageNo: number,
+  placement: IMainPlacement,
+  x: number,
+  y: number,
+  width: number,
+  documentModel: IDocumentModel
+) {
+  if (placement.kind !== 'text-line') {
+    return {
+      consumedHeight: placement.height,
+      renderBottom: y + placement.height
+    }
+  }
+
+  const resolved = resolveSurroundTextLinePlacement(
+    pageNo,
+    placement,
+    x,
+    y,
+    width,
+    documentModel.main.blockList
+  )
+
+  const renderBottom = resolved.fragmentList.reduce((bottom, fragment) => {
+    const fragmentBottom = fragment.placementList.reduce(
+      (maxBottom, textPlacement) => {
+        const measured = measureText(
+          textPlacement.text,
+          textPlacement.font,
+          textPlacement.size,
+          textPlacement.bold,
+          textPlacement.italic
+        )
+
+        return Math.max(
+          maxBottom,
+          fragment.y + textPlacement.y + measured.descent
+        )
+      },
+      fragment.y
+    )
+
+    return Math.max(bottom, fragmentBottom)
+  }, y)
+
+  return {
+    consumedHeight: resolved.consumedHeight,
+    renderBottom
+  }
+}
+
+function paginateMainPlacements(
+  placements: IMainPlacement[],
+  frame: IFrameLayoutResult,
+  documentModel: IDocumentModel,
+  contentWidth: number
+) {
+  const pageIndexes: number[][] = [[]]
+  let pageNo = 0
+  let cursorY = frame.mainTop
+  const x = documentModel.margins[3]
+  const pageBottom = frame.mainBottom
+
+  placements.forEach((placement, index) => {
+    let measurement = measurePlacementConsumedHeight(
+      pageNo,
+      placement,
+      x,
+      cursorY,
+      contentWidth,
+      documentModel
+    )
+
+    if (
+      measurement.renderBottom > pageBottom &&
+      pageIndexes[pageNo].length
+    ) {
+      pageNo += 1
+      pageIndexes[pageNo] = []
+      cursorY = frame.mainTop
+      measurement = measurePlacementConsumedHeight(
+        pageNo,
+        placement,
+        x,
+        cursorY,
+        contentWidth,
+        documentModel
+      )
+    }
+
+    pageIndexes[pageNo].push(index)
+    cursorY += measurement.consumedHeight
+
+    if (placement.forceBreakAfter && index < placements.length - 1) {
+      pageNo += 1
+      pageIndexes[pageNo] = []
+      cursorY = frame.mainTop
+    }
+  })
+
+  return pageIndexes
+}
+
 function collectControlBorderSegment(
   controlBorderSegmentMap: Map<IDocumentBlockNode, IControlBorderSegment>,
   placement: IMainPlacement,
@@ -2303,12 +2406,11 @@ export async function layoutDocument(
     mainPageHeight,
     documentModel
   )
-  const placementIndexes = paginateHeights(
-    placements.map(placement => ({
-      height: placement.height,
-      forceBreakAfter: placement.forceBreakAfter
-    })),
-    mainPageHeight
+  const placementIndexes = paginateMainPlacements(
+    placements,
+    frame,
+    documentModel,
+    contentWidth
   )
 
   const pageCount = getRequiredPageCount(documentModel, placementIndexes.length)
