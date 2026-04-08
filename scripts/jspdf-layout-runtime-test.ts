@@ -6400,6 +6400,107 @@ async function testLayoutDocumentSplitsTextAcrossThreeMixedSurroundImages() {
   }
 }
 
+async function testLayoutDocumentSplitsAreaDecorationsAcrossSurroundPageBreak() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.AREA,
+                value: '',
+                areaId: 'area-1',
+                area: {
+                  backgroundColor: '#ffeeaa',
+                  borderColor: '#cc8800'
+                },
+                valueList: [
+                  {
+                    value: 'aa'
+                  },
+                  {
+                    type: ElementType.IMAGE,
+                    value: 'data:image/png;base64,area-surround-page-break',
+                    width: 60,
+                    height: 24,
+                    imgDisplay: ImageDisplay.SURROUND,
+                    imgFloatPosition: {
+                      pageNo: 0,
+                      x: 25,
+                      y: 56
+                    }
+                  },
+                  {
+                    value: 'cccccccc'
+                  }
+                ]
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...createRuntimeSourceOptions(),
+          height: 90
+        }
+      } as any)
+    )
+
+    assert.equal(pageList.length, 2)
+    assert.deepEqual(
+      pageList.map(page => page.textRuns.map(run => run.text)),
+      [['aa'], ['cccccccc']]
+    )
+    assert.equal(
+      pageList[0].highlightRects.some(rect => rect.color === '#ffeeaa'),
+      true
+    )
+    assert.equal(
+      pageList[1].highlightRects.some(rect => rect.color === '#ffeeaa'),
+      true
+    )
+    assert.equal(
+      pageList[0].vectorLines.some(line => line.color === '#cc8800'),
+      true
+    )
+    assert.equal(
+      pageList[1].vectorLines.some(line => line.color === '#cc8800'),
+      true
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentRepeatsHeaderAndFooterFloatingImages() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -8280,6 +8381,7 @@ async function run() {
   await testLayoutDocumentSplitsTextAcrossTwoSurroundImages()
   await testLayoutDocumentMovesSurroundPushedLineToNextPage()
   await testLayoutDocumentSplitsTextAcrossThreeMixedSurroundImages()
+  await testLayoutDocumentSplitsAreaDecorationsAcrossSurroundPageBreak()
   await testLayoutDocumentRepeatsHeaderAndFooterFloatingImages()
   await testLayoutDocumentAssignsCoreDrawStages()
   await testLayoutDocumentAssignsHeaderFooterAndPageNumberStages()
