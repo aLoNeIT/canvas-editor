@@ -6501,6 +6501,103 @@ async function testLayoutDocumentSplitsAreaDecorationsAcrossSurroundPageBreak() 
   }
 }
 
+async function testLayoutDocumentKeepsLineNumbersAcrossSurroundPageBreak() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                value: 'aa'
+              },
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,line-number-surround-page-break',
+                width: 60,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 25,
+                  y: 56
+                }
+              },
+              {
+                value: 'cccccccc'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...createRuntimeSourceOptions(),
+          height: 90,
+          lineNumber: {
+            ...createRuntimeSourceOptions().lineNumber,
+            disabled: false
+          }
+        }
+      } as any)
+    )
+
+    assert.equal(pageList.length, 2)
+    assert.deepEqual(
+      pageList.map(page =>
+        page.textRuns
+          .filter(run => run.text === '1' || run.text === '2')
+          .map(({ text, x, y }) => ({ text, x, y }))
+      ),
+      [
+        [
+          {
+            text: '1',
+            x: -20,
+            y: 20
+          }
+        ],
+        [
+          {
+            text: '2',
+            x: -20,
+            y: 20
+          }
+        ]
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentRepeatsHeaderAndFooterFloatingImages() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -8382,6 +8479,7 @@ async function run() {
   await testLayoutDocumentMovesSurroundPushedLineToNextPage()
   await testLayoutDocumentSplitsTextAcrossThreeMixedSurroundImages()
   await testLayoutDocumentSplitsAreaDecorationsAcrossSurroundPageBreak()
+  await testLayoutDocumentKeepsLineNumbersAcrossSurroundPageBreak()
   await testLayoutDocumentRepeatsHeaderAndFooterFloatingImages()
   await testLayoutDocumentAssignsCoreDrawStages()
   await testLayoutDocumentAssignsHeaderFooterAndPageNumberStages()
