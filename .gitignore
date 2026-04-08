@@ -7,3 +7,4 @@ dist-ssr
 *.local
 cache
 .temp
+.tmp-jspdf-runtime-test
