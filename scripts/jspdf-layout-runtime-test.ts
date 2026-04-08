@@ -6713,6 +6713,256 @@ async function testLayoutDocumentSplitsHyperlinkLinksAcrossSurroundPageBreak() {
   }
 }
 
+async function testLayoutDocumentSplitsControlBorderAcrossSurroundPageBreak() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,control-surround-page-break',
+                width: 60,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 25,
+                  y: 56
+                }
+              },
+              {
+                type: ElementType.CONTROL,
+                value: '',
+                control: {
+                  type: ControlType.TEXT,
+                  border: true,
+                  value: [
+                    {
+                      value: 'cccccccccccccc'
+                    }
+                  ]
+                }
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...createRuntimeSourceOptions(),
+          height: 90,
+          control: {
+            ...createRuntimeSourceOptions().control,
+            prefix: '',
+            postfix: '',
+            borderWidth: 2,
+            borderColor: '#123456'
+          }
+        }
+      } as any)
+    )
+
+    assert.equal(pageList.length, 2)
+    assert.deepEqual(
+      pageList.map(page => page.textRuns.map(run => run.text).join('')),
+      ['cccccccccc', 'cccc']
+    )
+    assert.deepEqual(
+      pageList.map(page =>
+        page.vectorLines.filter(
+          line => line.color === '#123456' && line.width === 2
+        ).length
+      ),
+      [4, 4]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentKeepsMixedArtifactsAcrossSurroundPageBreak() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.AREA,
+                value: '',
+                areaId: 'area-1',
+                area: {
+                  backgroundColor: '#ffeeaa',
+                  borderColor: '#cc8800'
+                },
+                valueList: [
+                  {
+                    value: 'aa'
+                  },
+                  {
+                    type: ElementType.IMAGE,
+                    value: 'data:image/png;base64,mixed-surround-page-break',
+                    width: 60,
+                    height: 24,
+                    imgDisplay: ImageDisplay.SURROUND,
+                    imgFloatPosition: {
+                      pageNo: 0,
+                      x: 25,
+                      y: 56
+                    }
+                  },
+                  {
+                    type: ElementType.HYPERLINK,
+                    value: '',
+                    url: 'https://example.com/mixed-page-break',
+                    valueList: [
+                      {
+                        value: 'cccccccc'
+                      }
+                    ]
+                  },
+                  {
+                    type: ElementType.CONTROL,
+                    value: '',
+                    control: {
+                      type: ControlType.TEXT,
+                      border: true,
+                      value: [
+                        {
+                          value: 'dd'
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...createRuntimeSourceOptions(),
+          height: 90,
+          lineNumber: {
+            ...createRuntimeSourceOptions().lineNumber,
+            disabled: false
+          },
+          control: {
+            ...createRuntimeSourceOptions().control,
+            prefix: '',
+            postfix: '',
+            borderWidth: 2,
+            borderColor: '#123456'
+          }
+        }
+      } as any)
+    )
+
+    assert.equal(pageList.length, 2)
+    assert.deepEqual(
+      pageList.map(page =>
+        page.textRuns
+          .map(run => run.text)
+          .filter(text => text !== '1' && text !== '2' && text !== '3')
+      ),
+      [['aa'], ['cccccccc', 'dd']]
+    )
+    assert.deepEqual(
+      pageList.map(page => page.links.map(link => link.url)),
+      [[], ['https://example.com/mixed-page-break']]
+    )
+    assert.deepEqual(
+      pageList.map(page =>
+        page.textRuns
+          .map(run => run.text)
+          .filter(text => text === '1' || text === '2' || text === '3')
+      ),
+      [['1'], ['2', '3']]
+    )
+    assert.equal(
+      pageList[0].highlightRects.some(rect => rect.color === '#ffeeaa'),
+      true
+    )
+    assert.equal(
+      pageList[1].highlightRects.some(rect => rect.color === '#ffeeaa'),
+      true
+    )
+    assert.equal(
+      pageList[0].vectorLines.some(line => line.color === '#cc8800'),
+      true
+    )
+    assert.equal(
+      pageList[1].vectorLines.some(line => line.color === '#cc8800'),
+      true
+    )
+    assert.equal(
+      pageList[1].vectorLines.filter(
+        line => line.color === '#123456' && line.width === 2
+      ).length,
+      4
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentRepeatsHeaderAndFooterFloatingImages() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -8583,6 +8833,8 @@ async function run() {
   await testLayoutDocumentRendersHyperlinkWrapperLinks()
   await testLayoutDocumentSplitsHyperlinkLinksAroundSurroundImage()
   await testLayoutDocumentSplitsHyperlinkLinksAcrossSurroundPageBreak()
+  await testLayoutDocumentSplitsControlBorderAcrossSurroundPageBreak()
+  await testLayoutDocumentKeepsMixedArtifactsAcrossSurroundPageBreak()
   await testLayoutDocumentPlacesFloatingImageOutsideMainFlow()
   await testLayoutDocumentExtendsPageCountForLaterFloatingImage()
   await testLayoutDocumentWrapsTextAroundSurroundImage()
