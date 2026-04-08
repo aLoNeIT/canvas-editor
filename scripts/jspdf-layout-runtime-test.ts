@@ -6071,6 +6071,106 @@ async function testLayoutDocumentKeepsListMarkerAcrossSurroundPageBreak() {
   }
 }
 
+async function testLayoutDocumentKeepsOrderedListNumberAcrossSurroundPageBreak() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,surround-ordered-list-page-break',
+                width: 60,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 25,
+                  y: 56
+                }
+              },
+              {
+                value: 'xxxxxxxxxxxx',
+                listId: 'list-1',
+                listType: ListType.OL,
+                listStyle: ListStyle.DECIMAL
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...createRuntimeSourceOptions(),
+          height: 90
+        }
+      } as any)
+    )
+
+    assert.equal(pageList.length, 2)
+    assert.deepEqual(
+      pageList.map(page =>
+        page.textRuns.map(({ text, x, y }) => ({
+          text,
+          x,
+          y
+        }))
+      ),
+      [
+        [
+          {
+            text: '1.',
+            x: 10,
+            y: 20
+          },
+          {
+            text: 'xxxxxxx',
+            x: 40,
+            y: 20
+          }
+        ],
+        [
+          {
+            text: 'xxxxx',
+            x: 40,
+            y: 20
+          }
+        ]
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentContinuesSurroundSplitAcrossStackedImages() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -7204,6 +7304,177 @@ async function testLayoutDocumentKeepsMixedArtifactsAcrossThreePages() {
     assert.deepEqual(
       pageList.map(page => page.links.map(link => link.url)),
       [[], ['https://example.com/three-pages'], []]
+    )
+    assert.deepEqual(
+      pageList.map(page =>
+        page.vectorLines.filter(line => line.color === '#cc8800').length
+      ),
+      [4, 4, 4]
+    )
+    assert.deepEqual(
+      pageList.map(page =>
+        page.vectorLines.filter(line => line.color === '#123456').length
+      ),
+      [0, 0, 4]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentKeepsMixedArtifactsAcrossThreePagesWithMultiSurround() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.AREA,
+                value: '',
+                areaId: 'area-1',
+                area: {
+                  backgroundColor: '#ffeeaa',
+                  borderColor: '#cc8800'
+                },
+                valueList: [
+                  {
+                    value: 'aa'
+                  },
+                  {
+                    type: ElementType.IMAGE,
+                    value: 'data:image/png;base64,multi-surround-1',
+                    width: 60,
+                    height: 24,
+                    imgDisplay: ImageDisplay.SURROUND,
+                    imgFloatPosition: {
+                      pageNo: 0,
+                      x: 25,
+                      y: 56
+                    }
+                  },
+                  {
+                    type: ElementType.IMAGE,
+                    value: 'data:image/png;base64,multi-surround-2',
+                    width: 50,
+                    height: 24,
+                    imgDisplay: ImageDisplay.SURROUND,
+                    imgFloatPosition: {
+                      pageNo: 1,
+                      x: 35,
+                      y: 56
+                    }
+                  },
+                  {
+                    type: ElementType.HYPERLINK,
+                    value: '',
+                    url: 'https://example.com/multi-surround',
+                    valueList: [
+                      {
+                        value: 'hhhhhhhh'
+                      }
+                    ]
+                  },
+                  {
+                    value: 'tttttttt'
+                  },
+                  {
+                    type: ElementType.CONTROL,
+                    value: '',
+                    control: {
+                      type: ControlType.TEXT,
+                      border: true,
+                      value: [
+                        {
+                          value: 'cccccccc'
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...createRuntimeSourceOptions(),
+          height: 90,
+          lineNumber: {
+            ...createRuntimeSourceOptions().lineNumber,
+            disabled: false
+          },
+          control: {
+            ...createRuntimeSourceOptions().control,
+            prefix: '',
+            postfix: '',
+            borderWidth: 2,
+            borderColor: '#123456'
+          }
+        }
+      } as any)
+    )
+
+    assert.equal(pageList.length, 3)
+    assert.deepEqual(
+      pageList.map(page =>
+        page.textRuns
+          .map(run => run.text)
+          .filter(
+            text =>
+              text !== '1' &&
+              text !== '2' &&
+              text !== '3' &&
+              text !== '4'
+          )
+      ),
+      [['aa'], ['hhhhhhhh'], ['tttttttt', 'cccccccc']]
+    )
+    assert.deepEqual(
+      pageList.map(page =>
+        page.textRuns
+          .map(run => run.text)
+          .filter(
+            text =>
+              text === '1' ||
+              text === '2' ||
+              text === '3' ||
+              text === '4'
+          )
+      ),
+      [['1'], ['2'], ['3', '4']]
+    )
+    assert.deepEqual(
+      pageList.map(page => page.links.map(link => link.url)),
+      [[], ['https://example.com/multi-surround'], []]
     )
     assert.deepEqual(
       pageList.map(page =>
@@ -9102,6 +9373,7 @@ async function run() {
   await testLayoutDocumentContinuesSurroundSplitRemainderBelowImage()
   await testLayoutDocumentSplitsListItemAroundSurroundImage()
   await testLayoutDocumentKeepsListMarkerAcrossSurroundPageBreak()
+  await testLayoutDocumentKeepsOrderedListNumberAcrossSurroundPageBreak()
   await testLayoutDocumentContinuesSurroundSplitAcrossStackedImages()
   await testLayoutDocumentSplitsTextAcrossTwoSurroundImages()
   await testLayoutDocumentMovesSurroundPushedLineToNextPage()
@@ -9110,6 +9382,7 @@ async function run() {
   await testLayoutDocumentKeepsLineNumbersAcrossSurroundPageBreak()
   await testLayoutDocumentRepeatsHeaderAndFooterFloatingImages()
   await testLayoutDocumentKeepsMixedArtifactsAcrossThreePages()
+  await testLayoutDocumentKeepsMixedArtifactsAcrossThreePagesWithMultiSurround()
   await testLayoutDocumentAssignsCoreDrawStages()
   await testLayoutDocumentAssignsHeaderFooterAndPageNumberStages()
   await testLayoutDocumentAssignsStaticZoneBlockStages()
