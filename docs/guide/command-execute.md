@@ -741,8 +741,13 @@ const pdfBase64 = await (instance.command as CommandWithJspdf)
 
 ```javascript
 import { jspdfPlugin, type CommandWithJspdf } from '../../src/plugins/jspdf'
+import simsunTtfUrl from '../../src/assets/fonts/simsun.ttf'
 
-instance.use(jspdfPlugin)
+instance.use(jspdfPlugin, {
+  fonts: {
+    SimSun: simsunTtfUrl
+  }
+})
 
 const diagnostics = await (instance.command as CommandWithJspdf)
   .executeExportPdfDiagnostics({
@@ -751,6 +756,7 @@ const diagnostics = await (instance.command as CommandWithJspdf)
 
 console.log(diagnostics.pageCount)
 console.log(diagnostics.layoutWarnings)
+console.log(diagnostics.fallbackBlocks)
 ```
 
 ## executeReplaceImageElement

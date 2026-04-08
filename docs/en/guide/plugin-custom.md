@@ -39,9 +39,10 @@ instance.use(jspdfPlugin, {
 
 ### jsPDF Plugin Notes
 
-- `jspdfPlugin` owns its own document normalization, pagination, layout, and PDF rendering pipeline
+- `jspdfPlugin` owns an independent layout engine for document normalization, pagination, layout, and PDF rendering
 - The editor core only exposes neutral read-only capabilities such as `getValue()` and `getOptions()`
 - The core no longer exposes any PDF-specific API and does not provide `getPdfExportSnapshot`
+- Register fonts from local assets (for example `src/assets/fonts/simsun.ttf`) instead of remote font URLs
 
 ```javascript
 import { jspdfPlugin, type CommandWithJspdf } from '../../src/plugins/jspdf'
@@ -60,4 +61,8 @@ const diagnostics = await (instance.command as CommandWithJspdf)
   .executeExportPdfDiagnostics({
     debug: true
   })
+
+console.log(diagnostics.pageCount)
+console.log(diagnostics.layoutWarnings)
+console.log(diagnostics.fallbackBlocks)
 ```

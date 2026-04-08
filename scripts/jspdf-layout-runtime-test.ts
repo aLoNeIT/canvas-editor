@@ -5498,7 +5498,7 @@ async function testLayoutDocumentWrapsTextAroundSurroundImage() {
   }
 }
 
-async function testLayoutDocumentMovesTextBelowSurroundImageWhenRightSideIsTooNarrow() {
+async function testLayoutDocumentContinuesSurroundSplitWhenRightSideIsNarrow() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
 
@@ -5567,7 +5567,17 @@ async function testLayoutDocumentMovesTextBelowSurroundImageWhenRightSideIsTooNa
       })),
       [
         {
-          text: 'abcdef',
+          text: 'a',
+          x: 10,
+          y: 20
+        },
+        {
+          text: 'bc',
+          x: 85,
+          y: 20
+        },
+        {
+          text: 'def',
           x: 10,
           y: 44
         },
@@ -5575,6 +5585,374 @@ async function testLayoutDocumentMovesTextBelowSurroundImageWhenRightSideIsTooNa
           text: 'gh',
           x: 10,
           y: 84
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentSplitsTextLineAroundSurroundImage() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,surround-inline-split',
+                width: 20,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 35,
+                  y: 8
+                }
+              },
+              {
+                value: 'abcdefg'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y }) => ({
+        text,
+        x,
+        y
+      })),
+      [
+        {
+          text: 'ab',
+          x: 10,
+          y: 20
+        },
+        {
+          text: 'cdefg',
+          x: 55,
+          y: 20
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentContinuesSurroundSplitRemainderBelowImage() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,surround-inline-continue',
+                width: 30,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 35,
+                  y: 8
+                }
+              },
+              {
+                value: 'abcdefgh'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y }) => ({
+        text,
+        x,
+        y
+      })),
+      [
+        {
+          text: 'ab',
+          x: 10,
+          y: 20
+        },
+        {
+          text: 'cdef',
+          x: 65,
+          y: 20
+        },
+        {
+          text: 'gh',
+          x: 10,
+          y: 44
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentSplitsListItemAroundSurroundImage() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,surround-list-split',
+                width: 20,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 45,
+                  y: 8
+                }
+              },
+              {
+                value: 'abcdefg',
+                listId: 'list-1',
+                listType: ListType.UL,
+                listStyle: ListStyle.DISC
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y }) => ({
+        text,
+        x,
+        y
+      })),
+      [
+        {
+          text: '•',
+          x: 10,
+          y: 20
+        },
+        {
+          text: 'a',
+          x: 30,
+          y: 20
+        },
+        {
+          text: 'bcde',
+          x: 65,
+          y: 20
+        },
+        {
+          text: 'fg',
+          x: 30,
+          y: 44
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentContinuesSurroundSplitAcrossStackedImages() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,surround-stacked-top',
+                width: 30,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 35,
+                  y: 8
+                }
+              },
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,surround-stacked-bottom',
+                width: 30,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 35,
+                  y: 32
+                }
+              },
+              {
+                value: 'abcdefghijkl'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y }) => ({
+        text,
+        x,
+        y
+      })),
+      [
+        {
+          text: 'ab',
+          x: 10,
+          y: 20
+        },
+        {
+          text: 'cdef',
+          x: 65,
+          y: 20
+        },
+        {
+          text: 'gh',
+          x: 10,
+          y: 44
+        },
+        {
+          text: 'ijkl',
+          x: 65,
+          y: 44
         }
       ]
     )
@@ -7454,7 +7832,11 @@ async function run() {
   await testLayoutDocumentPlacesFloatingImageOutsideMainFlow()
   await testLayoutDocumentExtendsPageCountForLaterFloatingImage()
   await testLayoutDocumentWrapsTextAroundSurroundImage()
-  await testLayoutDocumentMovesTextBelowSurroundImageWhenRightSideIsTooNarrow()
+  await testLayoutDocumentContinuesSurroundSplitWhenRightSideIsNarrow()
+  await testLayoutDocumentSplitsTextLineAroundSurroundImage()
+  await testLayoutDocumentContinuesSurroundSplitRemainderBelowImage()
+  await testLayoutDocumentSplitsListItemAroundSurroundImage()
+  await testLayoutDocumentContinuesSurroundSplitAcrossStackedImages()
   await testLayoutDocumentRepeatsHeaderAndFooterFloatingImages()
   await testLayoutDocumentAssignsCoreDrawStages()
   await testLayoutDocumentAssignsHeaderFooterAndPageNumberStages()

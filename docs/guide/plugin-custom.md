@@ -42,6 +42,7 @@ instance.use(jspdfPlugin, {
 - `jspdfPlugin` 自己维护 PDF 导出的文档归一化、分页、排版和渲染流程
 - 核心只提供通用只读能力，例如 `getValue()` 和 `getOptions()`
 - 核心不提供任何 PDF 专用接口，也不再暴露 `getPdfExportSnapshot`
+- 字体建议通过本地资源注册（如 `src/assets/fonts/simsun.ttf`），避免依赖外部字体 URL
 
 ```javascript
 import { jspdfPlugin, type CommandWithJspdf } from '../../src/plugins/jspdf'
@@ -60,4 +61,8 @@ const diagnostics = await (instance.command as CommandWithJspdf)
   .executeExportPdfDiagnostics({
     debug: true
   })
+
+console.log(diagnostics.pageCount)
+console.log(diagnostics.layoutWarnings)
+console.log(diagnostics.fallbackBlocks)
 ```

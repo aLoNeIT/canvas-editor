@@ -7,6 +7,7 @@ import { BlockType } from '../../../editor/dataset/enum/Block'
 import { ImageDisplay } from '../../../editor/dataset/enum/Common'
 import { ElementType } from '../../../editor/dataset/enum/Element'
 import { LineNumberType } from '../../../editor/dataset/enum/LineNumber'
+import { splitText } from '../../../editor/utils'
 import {
   createListMarkerPlacement,
   resolveBlockTextStyle,
@@ -654,6 +655,352 @@ function getStyledTextLineWidth(line: IStyledTextPlacementLine) {
   }, 0)
 }
 
+function intersectsRect(
+  left: {
+    x: number
+    y: number
+    width: number
+    height: number
+  },
+  right: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }
+) {
+  const leftRight = left.x + left.width
+  const leftBottom = left.y + left.height
+  const rightRight = right.x + right.width
+  const rightBottom = right.y + right.height
+
+  if (
+    left.x > rightRight ||
+    leftRight < right.x ||
+    left.y > rightBottom ||
+    leftBottom < right.y
+  ) {
+    return false
+  }
+
+  return true
+}
+
+function getActiveSurroundRectList(
+  pageNo: number,
+  lineTop: number,
+  lineBottom: number,
+  blockList: IDocumentBlockNode[]
+) {
+  return blockList
+    .filter(block => {
+      if (!isSurroundImageBlock(block)) {
+        return false
+      }
+      if (getFloatingImagePageNo(block) !== pageNo) {
+        return false
+      }
+      const imageTop = block.element.imgFloatPosition!.y
+      const imageBottom = imageTop + (block.element.height || 0)
+      return lineBottom > imageTop && lineTop < imageBottom
+    })
+    .map(block => ({
+      x: block.element.imgFloatPosition!.x,
+      y: block.element.imgFloatPosition!.y,
+      width: block.element.width || 0,
+      height: block.element.height || 0
+    }))
+}
+
+function splitPlacementToChars(
+  placement: IStyledTextPlacementLine['placementList'][number]
+) {
+  const charList = splitText(placement.text)
+  if (charList.length <= 1) {
+    return [placement]
+  }
+
+  let cursorX = placement.x
+  return charList.map(char => {
+    const width =
+      measureText(
+        char,
+        placement.font,
+        placement.size,
+        placement.bold,
+        placement.italic
+      ).width + (placement.letterSpacing || 0)
+
+    const charPlacement = {
+      ...placement,
+      text: char,
+      x: cursorX,
+      width
+    }
+    cursorX += width
+    return charPlacement
+  })
+}
+
+function canMergePlacement(
+  left: IStyledTextPlacementLine['placementList'][number],
+  right: IStyledTextPlacementLine['placementList'][number]
+) {
+  return (
+    left.y === right.y &&
+    left.height === right.height &&
+    left.font === right.font &&
+    left.size === right.size &&
+    left.widthOverride === right.widthOverride &&
+    left.baselineShift === right.baselineShift &&
+    left.letterSpacing === right.letterSpacing &&
+    left.bold === right.bold &&
+    left.italic === right.italic &&
+    left.underline === right.underline &&
+    left.strikeout === right.strikeout &&
+    left.color === right.color &&
+    left.baselineOffset === right.baselineOffset &&
+    Math.abs(left.x + left.width - right.x) < 0.001
+  )
+}
+
+function mergePlacementChars(
+  placementList: IStyledTextPlacementLine['placementList']
+) {
+  return placementList.reduce<IStyledTextPlacementLine['placementList']>(
+    (merged, placement) => {
+      const previous = merged[merged.length - 1]
+      if (previous && canMergePlacement(previous, placement)) {
+        previous.text += placement.text
+        previous.width += placement.width
+        return merged
+      }
+
+      merged.push({ ...placement })
+      return merged
+    },
+    []
+  )
+}
+
+function groupPlacementFragments(
+  placementList: IStyledTextPlacementLine['placementList']
+) {
+  const fragmentGroupList: IStyledTextPlacementLine['placementList'][] = []
+
+  placementList.forEach(placementItem => {
+    const currentGroup = fragmentGroupList[fragmentGroupList.length - 1]
+    const previous = currentGroup?.[currentGroup.length - 1]
+    if (
+      currentGroup &&
+      previous &&
+      Math.abs(previous.x + previous.width - placementItem.x) < 0.001
+    ) {
+      currentGroup.push(placementItem)
+      return
+    }
+
+    fragmentGroupList.push([placementItem])
+  })
+
+  return fragmentGroupList
+}
+
+function createWrappedTextLineFragments(
+  placementList: IStyledTextPlacementLine['placementList'],
+  x: number,
+  y: number,
+  width: number,
+  lineHeight: number
+): IResolvedSurroundTextLineFragment[] {
+  const lineList: IStyledTextPlacementLine['placementList'][] = [[]]
+  let lineIndex = 0
+  let cursorX = 0
+
+  placementList.forEach(placementItem => {
+    if (
+      lineList[lineIndex].length &&
+      cursorX + placementItem.width > width
+    ) {
+      lineIndex += 1
+      lineList.push([])
+      cursorX = 0
+    }
+
+    lineList[lineIndex].push({
+      ...placementItem,
+      x: cursorX
+    })
+    cursorX += placementItem.width
+  })
+
+  return lineList
+    .filter(line => line.length)
+    .map((line, index) => ({
+      x,
+      y: y + index * lineHeight,
+      placementList: mergePlacementChars(line)
+    }))
+}
+
+function tryResolveSingleLineSurroundSplit(
+  pageNo: number,
+  placement: ITextLinePlacement,
+  x: number,
+  y: number,
+  width: number,
+  blockList: IDocumentBlockNode[]
+): IResolvedSurroundTextLineFragment[] | null {
+  const lineTop = y + placement.textStyle.rowMargin
+  const lineBottom = lineTop + placement.line.height
+  const surroundRectList = getActiveSurroundRectList(
+    pageNo,
+    lineTop,
+    lineBottom,
+    blockList
+  )
+  if (!surroundRectList.length) {
+    return null
+  }
+
+  const contentRight = x + width
+  const charPlacementList = placement.line.placementList.flatMap(splitPlacementToChars)
+  const shiftedPlacementList = charPlacementList.map(item => ({ ...item }))
+  const lineStartOffset = charPlacementList.length
+    ? Math.min(...charPlacementList.map(item => item.x))
+    : 0
+  const imageBottom = Math.max(
+    ...surroundRectList.map(rect => rect.y + rect.height)
+  )
+  let cursorX = x + lineStartOffset
+  let hasShifted = false
+  let overflowIndex = -1
+
+  for (let index = 0; index < shiftedPlacementList.length; index++) {
+    const charPlacement = shiftedPlacementList[index]
+    let targetX = cursorX
+
+    for (const surroundRect of surroundRectList) {
+      if (
+        intersectsRect(
+          {
+            x: targetX,
+            y: lineTop,
+            width: charPlacement.width,
+            height: placement.line.height
+          },
+          surroundRect
+        )
+      ) {
+        targetX = Math.max(targetX, surroundRect.x + surroundRect.width)
+      }
+    }
+
+    if (targetX + charPlacement.width > contentRight) {
+      overflowIndex = index
+      break
+    }
+
+    hasShifted ||= targetX !== cursorX
+    charPlacement.x = targetX - x
+    cursorX = targetX + charPlacement.width
+  }
+
+  if (!hasShifted) {
+    return null
+  }
+
+  const fittedPlacementList =
+    overflowIndex === -1
+      ? shiftedPlacementList
+      : shiftedPlacementList.slice(0, overflowIndex)
+  const mergedPlacementList = mergePlacementChars(fittedPlacementList)
+  const fragmentGroupList = groupPlacementFragments(mergedPlacementList)
+  const resolvedFragmentList = fragmentGroupList.map(group => {
+    const offsetX = group[0]?.x || 0
+    return {
+      x: x + offsetX,
+      y,
+      placementList: group.map(item => ({
+        ...item,
+        x: item.x - offsetX
+      }))
+    }
+  })
+
+  if (overflowIndex === -1) {
+    return resolvedFragmentList
+  }
+
+  if (!resolvedFragmentList.length) {
+    return null
+  }
+
+  const overflowPlacementList = charPlacementList
+    .slice(overflowIndex)
+    .map(item => ({ ...item }))
+  const overflowFragmentList = createWrappedTextLineFragments(
+    overflowPlacementList,
+    x + lineStartOffset,
+    imageBottom - placement.textStyle.rowMargin,
+    width,
+    placement.line.height
+  )
+
+  return [
+    ...resolvedFragmentList,
+    ...overflowFragmentList
+  ]
+}
+
+function appendResolvedTextLineFragments(
+  page: IPageModel,
+  block: IDocumentBlockNode,
+  fragmentList: IResolvedSurroundTextLineFragment[],
+  lineX: number,
+  textStyle: IResolvedBlockTextStyle,
+  listSemantic: IListBlockSemantics,
+  lineIndex: number,
+  stage: number = PDF_RENDER_STAGE.CONTENT
+) {
+  const firstFragment = fragmentList[0]
+  if (!firstFragment) {
+    return
+  }
+
+  if (lineIndex === 0) {
+    const markerPlacement = createListMarkerPlacement({
+      semantic: listSemantic,
+      x: 0,
+      y: 0,
+      height: firstFragment.placementList[0]?.height || 0,
+      baselineOffset:
+        firstFragment.placementList[0]?.baselineOffset || textStyle.size
+    })
+    if (markerPlacement) {
+      appendPlacementTextRuns(
+        page,
+        block,
+        [markerPlacement],
+        lineX,
+        firstFragment.y + textStyle.rowMargin,
+        stage
+      )
+    }
+  }
+
+  fragmentList.forEach(fragment => {
+    appendPlacementTextRuns(
+      page,
+      block,
+      fragment.placementList,
+      fragment.x,
+      fragment.y + textStyle.rowMargin,
+      stage
+    )
+  })
+}
+
 function resolveSurroundTextLinePlacement(
   pageNo: number,
   placement: ITextLinePlacement,
@@ -661,7 +1008,26 @@ function resolveSurroundTextLinePlacement(
   y: number,
   width: number,
   blockList: IDocumentBlockNode[]
-) {
+) : IResolvedSurroundTextLinePlacement {
+  const splitFragmentList = tryResolveSingleLineSurroundSplit(
+    pageNo,
+    placement,
+    x,
+    y,
+    width,
+    blockList
+  )
+  if (splitFragmentList) {
+    const lastFragment = splitFragmentList[splitFragmentList.length - 1]
+    return {
+      x: splitFragmentList[0].x,
+      y: splitFragmentList[0].y,
+      consumedHeight:
+        placement.height + (lastFragment?.y || y) - y,
+      fragmentList: splitFragmentList
+    }
+  }
+
   const rowMargin = placement.textStyle.rowMargin
   const contentRight = x + width
   let renderX = x
@@ -714,7 +1080,14 @@ function resolveSurroundTextLinePlacement(
   return {
     x: renderX,
     y: renderY,
-    consumedHeight: placement.height + extraHeight
+    consumedHeight: placement.height + extraHeight,
+    fragmentList: [
+      {
+        x: renderX,
+        y: renderY,
+        placementList: placement.line.placementList
+      }
+    ]
   }
 }
 
@@ -722,6 +1095,19 @@ interface IAppendPlacementResult {
   renderX: number
   renderY: number
   consumedHeight: number
+}
+
+interface IResolvedSurroundTextLineFragment {
+  x: number
+  y: number
+  placementList: IStyledTextPlacementLine['placementList']
+}
+
+interface IResolvedSurroundTextLinePlacement {
+  x: number
+  y: number
+  consumedHeight: number
+  fragmentList: IResolvedSurroundTextLineFragment[]
 }
 
 function getRequiredPageCount(
@@ -1547,14 +1933,13 @@ async function appendPlacement(
       width,
       documentModel.main.blockList
     )
-    appendResolvedTextLine(
+    appendResolvedTextLineFragments(
       page,
       placement.block,
-      placement.line,
+      surroundPlacement.fragmentList,
+      x,
       placement.textStyle,
       placement.listSemantic,
-      surroundPlacement.x,
-      surroundPlacement.y,
       placement.lineIndex
     )
     return {
