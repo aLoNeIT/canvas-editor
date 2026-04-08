@@ -6274,6 +6274,132 @@ async function testLayoutDocumentMovesSurroundPushedLineToNextPage() {
   }
 }
 
+async function testLayoutDocumentSplitsTextAcrossThreeMixedSurroundImages() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,surround-mixed-1',
+                width: 20,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 25,
+                  y: 8
+                }
+              },
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,surround-mixed-2',
+                width: 20,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 65,
+                  y: 8
+                }
+              },
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,surround-mixed-3',
+                width: 30,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 35,
+                  y: 32
+                }
+              },
+              {
+                value: 'abcdefghijklmn'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y }) => ({
+        text,
+        x,
+        y
+      })),
+      [
+        {
+          text: 'a',
+          x: 10,
+          y: 20
+        },
+        {
+          text: 'b',
+          x: 45,
+          y: 20
+        },
+        {
+          text: 'cd',
+          x: 85,
+          y: 20
+        },
+        {
+          text: 'ef',
+          x: 10,
+          y: 44
+        },
+        {
+          text: 'ghij',
+          x: 65,
+          y: 44
+        },
+        {
+          text: 'klmn',
+          x: 10,
+          y: 84
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentRepeatsHeaderAndFooterFloatingImages() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -8153,6 +8279,7 @@ async function run() {
   await testLayoutDocumentContinuesSurroundSplitAcrossStackedImages()
   await testLayoutDocumentSplitsTextAcrossTwoSurroundImages()
   await testLayoutDocumentMovesSurroundPushedLineToNextPage()
+  await testLayoutDocumentSplitsTextAcrossThreeMixedSurroundImages()
   await testLayoutDocumentRepeatsHeaderAndFooterFloatingImages()
   await testLayoutDocumentAssignsCoreDrawStages()
   await testLayoutDocumentAssignsHeaderFooterAndPageNumberStages()
