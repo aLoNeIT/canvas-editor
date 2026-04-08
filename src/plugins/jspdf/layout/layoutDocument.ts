@@ -843,6 +843,35 @@ function createWrappedTextLineFragments(
     }))
 }
 
+function resolveOverflowFragmentContinuations(
+  pageNo: number,
+  placement: ITextLinePlacement,
+  fragment: IResolvedSurroundTextLineFragment,
+  width: number,
+  blockList: IDocumentBlockNode[]
+): IResolvedSurroundTextLineFragment[] {
+  const fragmentPlacement: ITextLinePlacement = {
+    ...placement,
+    line: {
+      ...placement.line,
+      placementList: fragment.placementList.map(item => ({ ...item }))
+    },
+    height: placement.height,
+    lineIndex: placement.lineIndex + 1
+  }
+
+  const resolvedFragmentList = tryResolveSingleLineSurroundSplit(
+    pageNo,
+    fragmentPlacement,
+    fragment.x,
+    fragment.y,
+    width,
+    blockList
+  )
+
+  return resolvedFragmentList ?? [fragment]
+}
+
 function tryResolveSingleLineSurroundSplit(
   pageNo: number,
   placement: ITextLinePlacement,
@@ -869,9 +898,6 @@ function tryResolveSingleLineSurroundSplit(
   const lineStartOffset = charPlacementList.length
     ? Math.min(...charPlacementList.map(item => item.x))
     : 0
-  const imageBottom = Math.max(
-    ...surroundRectList.map(rect => rect.y + rect.height)
-  )
   let cursorX = x + lineStartOffset
   let hasShifted = false
   let overflowIndex = -1
@@ -939,6 +965,9 @@ function tryResolveSingleLineSurroundSplit(
   const overflowPlacementList = charPlacementList
     .slice(overflowIndex)
     .map(item => ({ ...item }))
+  const imageBottom = Math.max(
+    ...surroundRectList.map(rect => rect.y + rect.height)
+  )
   const overflowFragmentList = createWrappedTextLineFragments(
     overflowPlacementList,
     x + lineStartOffset,
@@ -947,9 +976,19 @@ function tryResolveSingleLineSurroundSplit(
     placement.line.height
   )
 
+  const continuationFragments = overflowFragmentList.flatMap(fragment =>
+    resolveOverflowFragmentContinuations(
+      pageNo,
+      placement,
+      fragment,
+      width,
+      blockList
+    )
+  )
+
   return [
     ...resolvedFragmentList,
-    ...overflowFragmentList
+    ...continuationFragments
   ]
 }
 

@@ -5950,9 +5950,14 @@ async function testLayoutDocumentContinuesSurroundSplitAcrossStackedImages() {
           y: 44
         },
         {
-          text: 'ijkl',
+          text: 'ij',
           x: 65,
           y: 44
+        },
+        {
+          text: 'kl',
+          x: 10,
+          y: 84
         }
       ]
     )
