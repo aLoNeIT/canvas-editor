@@ -6598,6 +6598,121 @@ async function testLayoutDocumentKeepsLineNumbersAcrossSurroundPageBreak() {
   }
 }
 
+async function testLayoutDocumentSplitsHyperlinkLinksAcrossSurroundPageBreak() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.HYPERLINK,
+                value: '',
+                url: 'https://example.com/page-break',
+                valueList: [
+                  {
+                    value: 'aa'
+                  }
+                ]
+              },
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,hyperlink-surround-page-break',
+                width: 60,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 25,
+                  y: 56
+                }
+              },
+              {
+                type: ElementType.HYPERLINK,
+                value: '',
+                url: 'https://example.com/page-break',
+                valueList: [
+                  {
+                    value: 'cccccccc'
+                  }
+                ]
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...createRuntimeSourceOptions(),
+          height: 90
+        }
+      } as any)
+    )
+
+    assert.equal(pageList.length, 2)
+    assert.deepEqual(
+      pageList.map(page =>
+        page.links.map(({ x, y, width, height, url }) => ({
+          x,
+          y,
+          width,
+          height,
+          url
+        }))
+      ),
+      [
+        [
+          {
+            x: 10,
+            y: 8,
+            width: 20,
+            height: 24,
+            url: 'https://example.com/page-break'
+          }
+        ],
+        [
+          {
+            x: 10,
+            y: 8,
+            width: 80,
+            height: 24,
+            url: 'https://example.com/page-break'
+          }
+        ]
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentRepeatsHeaderAndFooterFloatingImages() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -8467,6 +8582,7 @@ async function run() {
   await testLayoutDocumentKeepsTitleWrapperInlineChildrenInOneBlock()
   await testLayoutDocumentRendersHyperlinkWrapperLinks()
   await testLayoutDocumentSplitsHyperlinkLinksAroundSurroundImage()
+  await testLayoutDocumentSplitsHyperlinkLinksAcrossSurroundPageBreak()
   await testLayoutDocumentPlacesFloatingImageOutsideMainFlow()
   await testLayoutDocumentExtendsPageCountForLaterFloatingImage()
   await testLayoutDocumentWrapsTextAroundSurroundImage()
