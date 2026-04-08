@@ -8301,6 +8301,164 @@ async function testLayoutDocumentKeepsRowspanTableAcrossSurroundPageBreak() {
   }
 }
 
+async function testLayoutDocumentKeepsBadgesAcrossAreaSurroundPageBreak() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        toDataURL() {
+          return 'data:image/png;base64,badge-surround-page-break-fallback'
+        },
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            },
+            fillRect() {
+              return undefined
+            },
+            strokeRect() {
+              return undefined
+            },
+            fillText() {
+              return undefined
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        badge: {
+          main: {
+            value: 'main-badge',
+            width: 14,
+            height: 10,
+            left: 1,
+            top: 2
+          },
+          areas: [
+            {
+              areaId: 'area-1',
+              badge: {
+                value: 'area-badge',
+                width: 12,
+                height: 12,
+                left: 2,
+                top: 3
+              }
+            }
+          ]
+        },
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.AREA,
+                value: '',
+                areaId: 'area-1',
+                area: {
+                  backgroundColor: '#ffeeaa',
+                  borderColor: '#cc8800'
+                },
+                valueList: [
+                  {
+                    value: 'aa'
+                  },
+                  {
+                    type: ElementType.IMAGE,
+                    value: 'data:image/png;base64,badge-surround-page-break',
+                    width: 60,
+                    height: 24,
+                    imgDisplay: ImageDisplay.SURROUND,
+                    imgFloatPosition: {
+                      pageNo: 0,
+                      x: 25,
+                      y: 56
+                    }
+                  },
+                  {
+                    value: 'cccccccc'
+                  }
+                ]
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...createRuntimeSourceOptions(),
+          height: 90
+        }
+      } as any)
+    )
+
+    assert.equal(pageList.length, 2)
+    assert.deepEqual(
+      pageList.map(page =>
+        page.rasterBlocks
+          .filter(block => block.sourceType === 'badge')
+          .map(({ dataUrl, debugLabel, x, y, width, height }) => ({
+            dataUrl,
+            debugLabel,
+            x,
+            y,
+            width,
+            height
+          }))
+      ),
+      [
+        [
+          {
+            dataUrl: 'main-badge',
+            debugLabel: 'badge:main',
+            x: 1,
+            y: 2,
+            width: 14,
+            height: 10
+          },
+          {
+            dataUrl: 'area-badge',
+            debugLabel: 'badge:area-1',
+            x: 2,
+            y: 3,
+            width: 12,
+            height: 12
+          }
+        ],
+        [
+          {
+            dataUrl: 'area-badge',
+            debugLabel: 'badge:area-1',
+            x: 2,
+            y: 3,
+            width: 12,
+            height: 12
+          }
+        ]
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentRepeatsHeaderAndFooterFloatingImages() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -10196,6 +10354,7 @@ async function run() {
   await testLayoutDocumentKeepsTwoColumnTableAcrossSurroundPageBreak()
   await testLayoutDocumentKeepsLongMixedDocumentAcrossPages()
   await testLayoutDocumentKeepsRowspanTableAcrossSurroundPageBreak()
+  await testLayoutDocumentKeepsBadgesAcrossAreaSurroundPageBreak()
   await testLayoutDocumentAssignsCoreDrawStages()
   await testLayoutDocumentAssignsHeaderFooterAndPageNumberStages()
   await testLayoutDocumentAssignsStaticZoneBlockStages()
