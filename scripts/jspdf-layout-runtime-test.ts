@@ -5966,6 +5966,105 @@ async function testLayoutDocumentContinuesSurroundSplitAcrossStackedImages() {
   }
 }
 
+async function testLayoutDocumentSplitsTextAcrossTwoSurroundImages() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,surround-same-line-left',
+                width: 20,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 25,
+                  y: 8
+                }
+              },
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,surround-same-line-right',
+                width: 20,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 65,
+                  y: 8
+                }
+              },
+              {
+                value: 'abcd'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y }) => ({
+        text,
+        x,
+        y
+      })),
+      [
+        {
+          text: 'a',
+          x: 10,
+          y: 20
+        },
+        {
+          text: 'b',
+          x: 45,
+          y: 20
+        },
+        {
+          text: 'cd',
+          x: 85,
+          y: 20
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentRepeatsHeaderAndFooterFloatingImages() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -7842,6 +7941,7 @@ async function run() {
   await testLayoutDocumentContinuesSurroundSplitRemainderBelowImage()
   await testLayoutDocumentSplitsListItemAroundSurroundImage()
   await testLayoutDocumentContinuesSurroundSplitAcrossStackedImages()
+  await testLayoutDocumentSplitsTextAcrossTwoSurroundImages()
   await testLayoutDocumentRepeatsHeaderAndFooterFloatingImages()
   await testLayoutDocumentAssignsCoreDrawStages()
   await testLayoutDocumentAssignsHeaderFooterAndPageNumberStages()
