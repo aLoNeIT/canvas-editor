@@ -7790,6 +7790,336 @@ async function testLayoutDocumentKeepsTableAndControlAcrossSurroundPageBreak() {
   }
 }
 
+async function testLayoutDocumentKeepsTwoColumnTableAcrossSurroundPageBreak() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        toDataURL() {
+          return 'data:image/png;base64,table-surround-2col-fallback'
+        },
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            },
+            fillRect() {
+              return undefined
+            },
+            strokeRect() {
+              return undefined
+            },
+            fillText() {
+              return undefined
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.AREA,
+                value: '',
+                areaId: 'area-1',
+                area: {
+                  backgroundColor: '#ffeeaa',
+                  borderColor: '#cc8800'
+                },
+                valueList: [
+                  {
+                    value: 'aa'
+                  },
+                  {
+                    type: ElementType.IMAGE,
+                    value: 'data:image/png;base64,table-surround-2col',
+                    width: 60,
+                    height: 24,
+                    imgDisplay: ImageDisplay.SURROUND,
+                    imgFloatPosition: {
+                      pageNo: 0,
+                      x: 25,
+                      y: 56
+                    }
+                  },
+                  {
+                    type: ElementType.TABLE,
+                    value: '',
+                    colgroup: [{ width: 40 }, { width: 40 }],
+                    trList: [
+                      {
+                        height: 24,
+                        tdList: [createTd('A1'), createTd('B1')]
+                      },
+                      {
+                        height: 24,
+                        tdList: [createTd('A2'), createTd('B2')]
+                      },
+                      {
+                        height: 24,
+                        tdList: [createTd('A3'), createTd('B3')]
+                      }
+                    ]
+                  },
+                  {
+                    type: ElementType.CONTROL,
+                    value: '',
+                    control: {
+                      type: ControlType.TEXT,
+                      border: true,
+                      value: [
+                        {
+                          value: 'cccc'
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...createRuntimeSourceOptions(),
+          height: 90,
+          lineNumber: {
+            ...createRuntimeSourceOptions().lineNumber,
+            disabled: false
+          },
+          control: {
+            ...createRuntimeSourceOptions().control,
+            prefix: '',
+            postfix: '',
+            borderWidth: 2,
+            borderColor: '#123456'
+          }
+        }
+      } as any)
+    )
+
+    assert.equal(pageList.length, 2)
+    assert.deepEqual(
+      pageList.map(page =>
+        page.textRuns
+          .map(run => run.text)
+          .filter(
+            text =>
+              text !== '1' &&
+              text !== '2' &&
+              text !== '3' &&
+              text !== '4' &&
+              text !== '5'
+          )
+      ),
+      [['aa', 'A1', 'B1'], ['A2', 'B2', 'A3', 'B3', 'cccc']]
+    )
+    assert.deepEqual(
+      pageList.map(page =>
+        page.textRuns
+          .map(run => run.text)
+          .filter(
+            text =>
+              text === '1' ||
+              text === '2' ||
+              text === '3' ||
+              text === '4' ||
+              text === '5'
+          )
+      ),
+      [['1', '2'], ['3', '4', '5']]
+    )
+    assert.deepEqual(
+      pageList.map(page =>
+        page.highlightRects.filter(rect => rect.color === '#ffeeaa').length
+      ),
+      [1, 1]
+    )
+    assert.deepEqual(
+      pageList.map(page =>
+        page.vectorLines.filter(line => line.color === '#cc8800').length
+      ),
+      [4, 4]
+    )
+    assert.deepEqual(
+      pageList.map(page =>
+        page.vectorLines.filter(line => line.color === '#123456').length
+      ),
+      [0, 4]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentKeepsLongMixedDocumentAcrossPages() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        toDataURL() {
+          return 'data:image/png;base64,long-mixed-fallback'
+        },
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            },
+            fillRect() {
+              return undefined
+            },
+            strokeRect() {
+              return undefined
+            },
+            fillText() {
+              return undefined
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.AREA,
+                value: '',
+                areaId: 'area-1',
+                area: {
+                  backgroundColor: '#ffeeaa',
+                  borderColor: '#cc8800'
+                },
+                valueList: [
+                  {
+                    value: 'intro'
+                  },
+                  {
+                    type: ElementType.IMAGE,
+                    value: 'data:image/png;base64,long-mixed-image',
+                    width: 60,
+                    height: 24,
+                    imgDisplay: ImageDisplay.SURROUND,
+                    imgFloatPosition: {
+                      pageNo: 0,
+                      x: 25,
+                      y: 56
+                    }
+                  },
+                  {
+                    value: 'xxxxxxxxxxxx',
+                    listId: 'list-1',
+                    listType: ListType.OL,
+                    listStyle: ListStyle.DECIMAL
+                  },
+                  {
+                    type: ElementType.TABLE,
+                    value: '',
+                    colgroup: [{ width: 80 }],
+                    trList: [
+                      {
+                        height: 24,
+                        tdList: [createTd('row1')]
+                      },
+                      {
+                        height: 24,
+                        tdList: [createTd('row2')]
+                      }
+                    ]
+                  },
+                  {
+                    type: ElementType.HYPERLINK,
+                    value: '',
+                    url: 'https://example.com/long-sample',
+                    valueList: [
+                      {
+                        value: 'hhhh'
+                      }
+                    ]
+                  },
+                  {
+                    type: ElementType.CONTROL,
+                    value: '',
+                    control: {
+                      type: ControlType.TEXT,
+                      border: true,
+                      value: [
+                        {
+                          value: 'cccc'
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...createRuntimeSourceOptions(),
+          height: 90,
+          lineNumber: {
+            ...createRuntimeSourceOptions().lineNumber,
+            disabled: false
+          },
+          control: {
+            ...createRuntimeSourceOptions().control,
+            prefix: '',
+            postfix: '',
+            borderWidth: 2,
+            borderColor: '#123456'
+          }
+        }
+      } as any)
+    )
+
+    assert.equal(pageList.length, 4)
+    assert.deepEqual(
+      pageList.map(page => page.links.map(link => link.url)),
+      [[], [], ['https://example.com/long-sample'], []]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentRepeatsHeaderAndFooterFloatingImages() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -9682,6 +10012,8 @@ async function run() {
   await testLayoutDocumentKeepsMixedArtifactsAcrossThreePages()
   await testLayoutDocumentKeepsMixedArtifactsAcrossThreePagesWithMultiSurround()
   await testLayoutDocumentKeepsTableAndControlAcrossSurroundPageBreak()
+  await testLayoutDocumentKeepsTwoColumnTableAcrossSurroundPageBreak()
+  await testLayoutDocumentKeepsLongMixedDocumentAcrossPages()
   await testLayoutDocumentAssignsCoreDrawStages()
   await testLayoutDocumentAssignsHeaderFooterAndPageNumberStages()
   await testLayoutDocumentAssignsStaticZoneBlockStages()
