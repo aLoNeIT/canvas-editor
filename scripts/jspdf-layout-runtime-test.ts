@@ -5226,6 +5226,120 @@ async function testLayoutDocumentRendersHyperlinkWrapperLinks() {
   }
 }
 
+async function testLayoutDocumentSplitsHyperlinkLinksAroundSurroundImage() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.IMAGE,
+                value: 'data:image/png;base64,hyperlink-surround-split',
+                width: 20,
+                height: 24,
+                imgDisplay: ImageDisplay.SURROUND,
+                imgFloatPosition: {
+                  pageNo: 0,
+                  x: 35,
+                  y: 8
+                }
+              },
+              {
+                type: ElementType.HYPERLINK,
+                value: '',
+                url: 'https://example.com/split',
+                valueList: [
+                  {
+                    value: 'abcdefg'
+                  }
+                ]
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(({ text, x, y }) => ({
+        text,
+        x,
+        y
+      })),
+      [
+        {
+          text: 'ab',
+          x: 10,
+          y: 20
+        },
+        {
+          text: 'cdefg',
+          x: 55,
+          y: 20
+        }
+      ]
+    )
+    assert.deepEqual(
+      pageList[0].links.map(({ x, y, width, height, url }) => ({
+        x,
+        y,
+        width,
+        height,
+        url
+      })),
+      [
+        {
+          x: 10,
+          y: 8,
+          width: 20,
+          height: 24,
+          url: 'https://example.com/split'
+        },
+        {
+          x: 55,
+          y: 8,
+          width: 50,
+          height: 24,
+          url: 'https://example.com/split'
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentPlacesFloatingImageOutsideMainFlow() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -7933,6 +8047,7 @@ async function run() {
   await testLayoutDocumentRendersTitleWrapperWithMappedSize()
   await testLayoutDocumentKeepsTitleWrapperInlineChildrenInOneBlock()
   await testLayoutDocumentRendersHyperlinkWrapperLinks()
+  await testLayoutDocumentSplitsHyperlinkLinksAroundSurroundImage()
   await testLayoutDocumentPlacesFloatingImageOutsideMainFlow()
   await testLayoutDocumentExtendsPageCountForLaterFloatingImage()
   await testLayoutDocumentWrapsTextAroundSurroundImage()
