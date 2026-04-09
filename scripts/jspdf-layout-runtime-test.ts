@@ -550,6 +550,42 @@ function testNormalizeDocumentSkipsHiddenElements() {
   )
 }
 
+function testNormalizeDocumentResolvesLatexSvgMetrics() {
+  const runtimeGlobal = globalThis as any
+  const previousWindow = runtimeGlobal.window
+  runtimeGlobal.window = {
+    btoa: globalThis.btoa.bind(globalThis)
+  }
+
+  try {
+  const documentModel = normalizeDocument({
+    result: {
+      data: {
+        header: [],
+        main: [
+          {
+            type: ElementType.LATEX,
+            value: 'x^2'
+          }
+        ],
+        footer: [],
+        graffiti: []
+      }
+    },
+    options: createRuntimeSourceOptions()
+  } as any)
+
+  const latexElement = documentModel.main.blockList[0]?.element
+  assert.equal(documentModel.main.blockList[0]?.kind, 'latex')
+  assert.equal(latexElement?.type, ElementType.LATEX)
+  assert.ok((latexElement?.width || 0) > 0)
+  assert.ok((latexElement?.height || 0) > 0)
+  assert.match(latexElement?.laTexSVG || '', /^data:image\/svg\+xml/)
+  } finally {
+    runtimeGlobal.window = previousWindow
+  }
+}
+
 function testTracksBadgeStateViaWrappedCommands() {
   const mainCallList: unknown[] = []
   const areaCallList: unknown[] = []
@@ -1656,6 +1692,9 @@ async function testLayoutDocumentFallsBackForEmptyControl() {
     fillRect() {
       return undefined
     },
+    clearRect() {
+      return undefined
+    },
     strokeRect() {
       return undefined
     },
@@ -1808,6 +1847,9 @@ async function testLayoutDocumentRendersControlPlaceholder() {
       }
     },
     fillRect() {
+      return undefined
+    },
+    clearRect() {
       return undefined
     },
     strokeRect() {
@@ -1988,6 +2030,9 @@ async function testLayoutDocumentRendersDefaultControlPrefixAndPostfix() {
       }
     },
     fillRect() {
+      return undefined
+    },
+    clearRect() {
       return undefined
     },
     strokeRect() {
@@ -2191,6 +2236,9 @@ async function testLayoutDocumentFallsBackForHeaderControl() {
     fillRect() {
       return undefined
     },
+    clearRect() {
+      return undefined
+    },
     strokeRect() {
       return undefined
     },
@@ -2343,6 +2391,9 @@ async function testLayoutDocumentRendersStandaloneCheckboxAndRadio() {
       }
     },
     fillRect() {
+      return undefined
+    },
+    clearRect() {
       return undefined
     },
     strokeRect() {
@@ -2530,6 +2581,9 @@ async function testLayoutDocumentRendersCheckboxAndRadioControlOptions() {
       }
     },
     fillRect() {
+      return undefined
+    },
+    clearRect() {
       return undefined
     },
     strokeRect() {
@@ -4247,9 +4301,11 @@ async function testLayoutDocumentRendersDateWrapperText() {
   }
 }
 
-async function testLayoutDocumentMarksLatexAsPending() {
+async function testLayoutDocumentRendersLatexAsImage() {
   const previousDocument = globalThis.document
+  const previousImage = globalThis.Image
   const runtimeGlobal = globalThis as any
+  const drawImageCallList: unknown[][] = []
 
   const ctx = {
     fillStyle: '#000000',
@@ -4265,11 +4321,26 @@ async function testLayoutDocumentMarksLatexAsPending() {
     fillRect() {
       return undefined
     },
+    clearRect() {
+      return undefined
+    },
     strokeRect() {
       return undefined
     },
     fillText() {
       return undefined
+    },
+    drawImage(...args: unknown[]) {
+      drawImageCallList.push(args)
+      return undefined
+    }
+  }
+
+  class MockImage {
+    onload: null | (() => void) = null
+    onerror: null | (() => void) = null
+    set src(_value: string) {
+      this.onload?.()
     }
   }
 
@@ -4291,6 +4362,7 @@ async function testLayoutDocumentMarksLatexAsPending() {
       }
     }
   }
+  runtimeGlobal.Image = MockImage
 
   try {
     const pageList = await layoutDocument({
@@ -4377,7 +4449,9 @@ async function testLayoutDocumentMarksLatexAsPending() {
             element: {
               type: ElementType.LATEX,
               value: 'x^2',
-              laTexSVG: '<svg></svg>'
+              width: 36,
+              height: 24,
+              laTexSVG: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4='
             }
           }
         ],
@@ -4391,9 +4465,18 @@ async function testLayoutDocumentMarksLatexAsPending() {
       }
     } as any)
 
-    assert.deepEqual(pageList[0].issues, ['pending:latex', 'fallback:latex'])
+    assert.deepEqual(pageList[0].issues, [])
+    assert.equal(pageList[0].rasterBlocks.length, 1)
+    assert.equal(pageList[0].rasterBlocks[0]?.sourceType, 'image')
+    assert.equal(pageList[0].rasterBlocks[0]?.debugLabel, 'latex')
+    assert.equal(
+      pageList[0].rasterBlocks[0]?.dataUrl,
+      'data:image/png;base64,latex-fallback'
+    )
+    assert.equal(drawImageCallList.length, 1)
   } finally {
     runtimeGlobal.document = previousDocument
+    runtimeGlobal.Image = previousImage
   }
 }
 
@@ -9820,9 +9903,11 @@ async function testLayoutDocumentAssignsStaticZoneControlBorderStage() {
   }
 }
 
-async function testLayoutDocumentMarksStaticZoneLatexAsPending() {
+async function testLayoutDocumentRendersStaticZoneLatex() {
   const previousDocument = globalThis.document
+  const previousImage = globalThis.Image
   const runtimeGlobal = globalThis as any
+  const drawImageCallList: unknown[][] = []
 
   const ctx = {
     fillStyle: '#000000',
@@ -9838,11 +9923,26 @@ async function testLayoutDocumentMarksStaticZoneLatexAsPending() {
     fillRect() {
       return undefined
     },
+    clearRect() {
+      return undefined
+    },
     strokeRect() {
       return undefined
     },
     fillText() {
       return undefined
+    },
+    drawImage(...args: unknown[]) {
+      drawImageCallList.push(args)
+      return undefined
+    }
+  }
+
+  class MockImage {
+    onload: null | (() => void) = null
+    onerror: null | (() => void) = null
+    set src(_value: string) {
+      this.onload?.()
     }
   }
 
@@ -9864,6 +9964,7 @@ async function testLayoutDocumentMarksStaticZoneLatexAsPending() {
       }
     }
   }
+  runtimeGlobal.Image = MockImage
 
   try {
     const pageList = await layoutDocument(
@@ -9874,7 +9975,9 @@ async function testLayoutDocumentMarksStaticZoneLatexAsPending() {
               {
                 type: ElementType.LATEX,
                 value: 'x^2',
-                laTexSVG: '<svg></svg>'
+                width: 36,
+                height: 24,
+                laTexSVG: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4='
               }
             ],
             main: [
@@ -9890,14 +9993,18 @@ async function testLayoutDocumentMarksStaticZoneLatexAsPending() {
       } as any)
     )
 
-    assert.deepEqual(pageList[0].issues, ['pending:latex', 'fallback:latex'])
+    assert.deepEqual(pageList[0].issues, [])
     assert.equal(pageList[0].rasterBlocks[0]?.stage, 40)
+    assert.equal(pageList[0].rasterBlocks[0]?.sourceType, 'image')
+    assert.equal(pageList[0].rasterBlocks[0]?.debugLabel, 'latex')
     assert.equal(
       pageList[0].rasterBlocks[0]?.dataUrl,
       'data:image/png;base64,static-zone-latex-fallback'
     )
+    assert.equal(drawImageCallList.length, 1)
   } finally {
     runtimeGlobal.document = previousDocument
+    runtimeGlobal.Image = previousImage
   }
 }
 
@@ -11968,6 +12075,7 @@ async function run() {
   testMeasuresRowHeightByResolvedCellTextSize()
   testDistributesRowspanExtraHeightToSpanTailRow()
   testNormalizeDocumentSkipsHiddenElements()
+  testNormalizeDocumentResolvesLatexSvgMetrics()
   testTracksBadgeStateViaWrappedCommands()
   testNormalizeDocumentCopiesBadgeState()
   testCreatesPerLineTextPlacements()
@@ -12004,7 +12112,7 @@ async function run() {
   await testLayoutDocumentRendersDateControlValue()
   await testLayoutDocumentRendersNumberControlValue()
   await testLayoutDocumentRendersDateWrapperText()
-  await testLayoutDocumentMarksLatexAsPending()
+  await testLayoutDocumentRendersLatexAsImage()
   await testLayoutDocumentMarksBlockIframeAndVideoAsPending()
   await testLayoutDocumentAppendsAreaDecorations()
   await testLayoutDocumentAppendsMainAndAreaBadges()
@@ -12050,7 +12158,7 @@ async function run() {
   await testLayoutDocumentAssignsLabelAndSeparatorStages()
   await testLayoutDocumentAssignsStaticZoneBlockStages()
   await testLayoutDocumentAssignsStaticZoneControlBorderStage()
-  await testLayoutDocumentMarksStaticZoneLatexAsPending()
+  await testLayoutDocumentRendersStaticZoneLatex()
   testCreatesCenteredPageNumberPlacement()
   testCreatesContinuityLineNumberPlacements()
   testCreatesPageScopedLineNumberPlacements()

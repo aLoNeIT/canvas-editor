@@ -40,6 +40,7 @@ import { resolveTableRowHeightList } from './tableMetrics'
 import { createTableCellVisuals } from './tableVisual'
 import { PDF_RENDER_STAGE } from '../render/renderStage'
 import type { IStyledTextPlacementLine } from './styledTextRunPlacement'
+import { createLatexRasterBlock } from './latex'
 
 const DEFAULT_TAB_WIDTH = 32
 
@@ -1992,10 +1993,8 @@ async function appendImageOrFallback(
   stage: number = PDF_RENDER_STAGE.CONTENT
 ) {
   const pendingIssue =
-    block.kind === 'latex'
-      ? 'pending:latex'
-      : block.kind === 'block' &&
-          block.element.block?.type === BlockType.IFRAME
+    block.kind === 'block' &&
+      block.element.block?.type === BlockType.IFRAME
         ? 'pending:block-iframe'
         : block.kind === 'block' &&
             block.element.block?.type === BlockType.VIDEO
@@ -2003,6 +2002,19 @@ async function appendImageOrFallback(
           : null
   if (pendingIssue && !page.issues.includes(pendingIssue)) {
     page.issues.push(pendingIssue)
+  }
+
+  if (block.kind === 'latex') {
+    page.rasterBlocks.push(
+      await createLatexRasterBlock({
+        pageNo: page.pageNo,
+        stage,
+        x,
+        y,
+        element: block.element
+      })
+    )
+    return
   }
 
   const value = block.element.value || ''

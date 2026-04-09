@@ -7,6 +7,7 @@ import type {
 } from '../model/document'
 import { ElementType } from '../../../editor/dataset/enum/Element'
 import { TitleLevel } from '../../../editor/dataset/enum/Title'
+import { resolveLatexAsset } from '../layout/latex'
 
 function getBlockKind(element: IDocumentBlockNode['element']): IDocumentBlockNode['kind'] {
   switch (element.type) {
@@ -73,38 +74,62 @@ function normalizeValueList(
       return []
     }
 
-    if (!element.valueList?.length) {
-      return [element]
+    const normalizedElement = normalizeElement(element)
+
+    if (!normalizedElement.valueList?.length) {
+      return [normalizedElement]
     }
 
-    if (!isVirtualWrapperElement(element)) {
-      const normalizedChildren = normalizeValueList(element.valueList)
+    if (!isVirtualWrapperElement(normalizedElement)) {
+      const normalizedChildren = normalizeValueList(normalizedElement.valueList)
       return [
         {
-          ...element,
+          ...normalizedElement,
           valueList: normalizedChildren
         }
       ]
     }
 
-    if (isFlattenWrapperElement(element)) {
+    if (isFlattenWrapperElement(normalizedElement)) {
       return normalizeValueList(
-        element.valueList.map(child => mergeAreaIntoChild(element, child))
+        normalizedElement.valueList.map(child =>
+          mergeAreaIntoChild(normalizedElement, child)
+        )
       )
     }
 
-    const normalizedChildren = normalizeValueList(element.valueList)
-    if (!element.value && !normalizedChildren.length) {
+    const normalizedChildren = normalizeValueList(normalizedElement.valueList)
+    if (!normalizedElement.value && !normalizedChildren.length) {
       return []
     }
 
     return [
       {
-        ...element,
+        ...normalizedElement,
         valueList: normalizedChildren
       }
     ]
   })
+}
+
+function normalizeElement(
+  element: IJspdfSourceState['result']['data']['main'][number]
+) {
+  if (element.type !== ElementType.LATEX) {
+    return element
+  }
+
+  const asset = resolveLatexAsset(element)
+  if (!asset) {
+    return element
+  }
+
+  return {
+    ...element,
+    width: element.width || asset.width,
+    height: element.height || asset.height,
+    laTexSVG: element.laTexSVG || asset.svgDataUrl
+  }
 }
 
 function createZone(
