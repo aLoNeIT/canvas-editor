@@ -51,6 +51,10 @@ import { renderImages } from '../src/plugins/jspdf/render/renderImage.js'
 import { partitionRasterBlocksByLayer } from '../src/plugins/jspdf/render/renderImage.js'
 import { collectPageRenderOperations } from '../src/plugins/jspdf/render/renderStage.js'
 import { renderTextRuns } from '../src/plugins/jspdf/render/renderText.js'
+import {
+  renderVectorLine,
+  renderVectorLines
+} from '../src/plugins/jspdf/render/renderVector.js'
 import { createTextPlacements } from '../src/plugins/jspdf/layout/textPlacement.js'
 import { wrapText } from '../src/plugins/jspdf/layout/wrapText.js'
 import {
@@ -10463,6 +10467,148 @@ function testRenderTextRunsAppliesLetterSpacingCharSpace() {
   ])
 }
 
+function testRenderVectorLineAppliesDashAndResetsSolidStroke() {
+  const callList: Array<{
+    name: string
+    args: unknown[]
+  }> = []
+  const doc = {
+    setDrawColor(...args: unknown[]) {
+      callList.push({
+        name: 'setDrawColor',
+        args
+      })
+    },
+    setLineWidth(...args: unknown[]) {
+      callList.push({
+        name: 'setLineWidth',
+        args
+      })
+    },
+    setLineDashPattern(...args: unknown[]) {
+      callList.push({
+        name: 'setLineDashPattern',
+        args
+      })
+    },
+    line(...args: unknown[]) {
+      callList.push({
+        name: 'line',
+        args
+      })
+    }
+  }
+
+  renderVectorLine(doc as any, {
+    pageNo: 0,
+    x1: 10,
+    y1: 20,
+    x2: 30,
+    y2: 40,
+    color: '#aa0000',
+    width: 2,
+    dash: [4, 2]
+  })
+  renderVectorLine(doc as any, {
+    pageNo: 0,
+    x1: 30,
+    y1: 40,
+    x2: 50,
+    y2: 60,
+    color: '#00aa00',
+    width: 1
+  })
+
+  assert.deepEqual(callList, [
+    {
+      name: 'setDrawColor',
+      args: ['#aa0000']
+    },
+    {
+      name: 'setLineWidth',
+      args: [2]
+    },
+    {
+      name: 'setLineDashPattern',
+      args: [[4, 2], 0]
+    },
+    {
+      name: 'line',
+      args: [10, 20, 30, 40]
+    },
+    {
+      name: 'setDrawColor',
+      args: ['#00aa00']
+    },
+    {
+      name: 'setLineWidth',
+      args: [1]
+    },
+    {
+      name: 'setLineDashPattern',
+      args: [[], 0]
+    },
+    {
+      name: 'line',
+      args: [30, 40, 50, 60]
+    }
+  ])
+}
+
+function testRenderVectorLinesRendersWholePageVectorList() {
+  const lineCallList: unknown[][] = []
+
+  renderVectorLines(
+    {
+      setDrawColor() {
+        return undefined
+      },
+      setLineWidth() {
+        return undefined
+      },
+      setLineDashPattern() {
+        return undefined
+      },
+      line(...args: unknown[]) {
+        lineCallList.push(args)
+      }
+    } as any,
+    {
+      pageNo: 0,
+      width: 100,
+      height: 100,
+      textRuns: [],
+      highlightRects: [],
+      links: [],
+      rasterBlocks: [],
+      issues: [],
+      vectorLines: [
+        {
+          pageNo: 0,
+          x1: 1,
+          y1: 2,
+          x2: 3,
+          y2: 4,
+          color: '#111111'
+        },
+        {
+          pageNo: 0,
+          x1: 5,
+          y1: 6,
+          x2: 7,
+          y2: 8,
+          color: '#222222'
+        }
+      ]
+    } as any
+  )
+
+  assert.deepEqual(lineCallList, [
+    [1, 2, 3, 4],
+    [5, 6, 7, 8]
+  ])
+}
+
 async function testRenderImagesAppliesCropBeforeAddingImage() {
   const previousImage = globalThis.Image
   const previousDocument = globalThis.document
@@ -11033,6 +11179,8 @@ async function run() {
   testLayoutTableComputesSpanGeometry()
   testResolvesPdfBoldItalicFontStyle()
   testRenderTextRunsAppliesLetterSpacingCharSpace()
+  testRenderVectorLineAppliesDashAndResetsSolidStroke()
+  testRenderVectorLinesRendersWholePageVectorList()
   await testRenderImagesAppliesCropBeforeAddingImage()
 }
 
