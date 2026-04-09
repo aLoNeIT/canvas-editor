@@ -1550,6 +1550,19 @@ function collectMainPlacements(
     }
 
     if (
+      block.element.type === ElementType.LABEL ||
+      block.element.type === ElementType.SEPARATOR
+    ) {
+      placementList.push({
+        kind: 'block',
+        block,
+        height: getBlockLayoutHeight(block, width, documentModel),
+        defaults: documentModel.defaults
+      })
+      return placementList
+    }
+
+    if (
       block.kind === 'paragraph' ||
       block.kind === 'control'
     ) {

@@ -8998,6 +8998,208 @@ async function testLayoutDocumentAssignsHeaderFooterAndPageNumberStages() {
   }
 }
 
+async function testLayoutDocumentAppendsFrameDecorationsToPageModel() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const option = createRuntimeSourceOptions()
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                value: 'M'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...option,
+          background: {
+            ...option.background,
+            color: '#f5eedd'
+          },
+          pageNumber: {
+            ...option.pageNumber,
+            disabled: false,
+            format: '{pageNo}/{pageCount}'
+          },
+          watermark: {
+            ...option.watermark,
+            data: 'WM-{pageNo}'
+          }
+        }
+      } as any)
+    )
+
+    const page = pageList[0]
+    const backgroundRect = page.highlightRects.find(
+      rect => rect.stage === 0 && rect.color === '#f5eedd'
+    ) as any
+    const watermarkRun = page.textRuns.find(run => run.text === 'WM-1') as any
+    const pageNumberRun = page.textRuns.find(run => run.text === '1/1') as any
+
+    assert.deepEqual(backgroundRect, {
+      pageNo: 0,
+      stage: 0,
+      x: 0,
+      y: 0,
+      width: 120,
+      height: 100,
+      color: '#f5eedd',
+      opacity: 1
+    })
+    assert.equal(watermarkRun.stage, 0)
+    assert.equal(watermarkRun.rotate, -45)
+    assert.equal(watermarkRun.opacity, 0.3)
+    assert.equal(pageNumberRun.stage, 41)
+    assert.deepEqual(page.issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentAssignsLabelAndSeparatorStages() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [
+              {
+                type: ElementType.LABEL,
+                value: 'H',
+                label: {
+                  color: '#ffffff',
+                  backgroundColor: '#aa0000',
+                  padding: [2, 4, 2, 4]
+                }
+              }
+            ],
+            main: [
+              {
+                type: ElementType.LABEL,
+                value: 'M',
+                label: {
+                  color: '#ffffff',
+                  backgroundColor: '#0000aa',
+                  padding: [2, 4, 2, 4]
+                }
+              },
+              {
+                type: ElementType.SEPARATOR,
+                value: '',
+                width: 40,
+                lineWidth: 2,
+                color: '#00aa00',
+                dashArray: [3, 1]
+              }
+            ],
+            footer: [
+              {
+                type: ElementType.SEPARATOR,
+                value: '',
+                width: 30,
+                lineWidth: 1,
+                color: '#ff8800',
+                dashArray: [4, 2]
+              }
+            ],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    const page = pageList[0]
+    const operationList = collectPageRenderOperations(page)
+    const headerRun = page.textRuns.find(run => run.text === 'H') as any
+    const mainRun = page.textRuns.find(run => run.text === 'M') as any
+    const headerLabelRect = operationList.find(
+      operation =>
+        operation.kind === 'highlight' && operation.item.color === '#aa0000'
+    ) as any
+    const mainLabelRect = operationList.find(
+      operation =>
+        operation.kind === 'highlight' && operation.item.color === '#0000aa'
+    ) as any
+    const mainSeparator = operationList.find(
+      operation =>
+        operation.kind === 'vector' && operation.item.color === '#00aa00'
+    ) as any
+    const footerSeparator = operationList.find(
+      operation =>
+        operation.kind === 'vector' && operation.item.color === '#ff8800'
+    ) as any
+
+    assert.equal(headerRun.stage, 40)
+    assert.equal(mainRun.stage, 30)
+    assert.equal(headerLabelRect.stage, 40)
+    assert.equal(mainLabelRect.stage, 30)
+    assert.equal(mainSeparator.stage, 30)
+    assert.deepEqual(mainSeparator.item.dash, [3, 1])
+    assert.equal(footerSeparator.stage, 42)
+    assert.deepEqual(footerSeparator.item.dash, [4, 2])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentAssignsStaticZoneBlockStages() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -10539,6 +10741,8 @@ async function run() {
   await testLayoutDocumentKeepsCompoundSpanTableAcrossSurroundPageBreak()
   await testLayoutDocumentAssignsCoreDrawStages()
   await testLayoutDocumentAssignsHeaderFooterAndPageNumberStages()
+  await testLayoutDocumentAppendsFrameDecorationsToPageModel()
+  await testLayoutDocumentAssignsLabelAndSeparatorStages()
   await testLayoutDocumentAssignsStaticZoneBlockStages()
   await testLayoutDocumentAssignsStaticZoneControlBorderStage()
   await testLayoutDocumentMarksStaticZoneLatexAsPending()
