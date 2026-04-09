@@ -3808,6 +3808,260 @@ async function testLayoutDocumentAppendsTextControlBorder() {
   }
 }
 
+async function testLayoutDocumentRendersDateControlValue() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const option = createRuntimeSourceOptions()
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.CONTROL,
+                value: '',
+                control: {
+                  type: ControlType.DATE,
+                  dateFormat: 'yyyy-MM-dd',
+                  value: [
+                    {
+                      value: '2026-04-09',
+                      color: '#aa0000'
+                    }
+                  ]
+                }
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...option,
+          control: {
+            ...option.control,
+            prefix: '',
+            postfix: ''
+          }
+        }
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(run => ({
+        text: run.text,
+        color: run.color
+      })),
+      [
+        {
+          text: '2026-04-09',
+          color: '#aa0000'
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRendersNumberControlValue() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const option = createRuntimeSourceOptions()
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.CONTROL,
+                value: '',
+                control: {
+                  type: ControlType.NUMBER,
+                  value: [
+                    {
+                      value: '-12.5',
+                      bold: true,
+                      color: '#0055aa'
+                    }
+                  ]
+                }
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...option,
+          control: {
+            ...option.control,
+            prefix: '',
+            postfix: ''
+          }
+        }
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(run => ({
+        text: run.text,
+        bold: run.bold,
+        color: run.color
+      })),
+      [
+        {
+          text: '-12.5',
+          bold: true,
+          color: '#0055aa'
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRendersDateWrapperText() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                value: 'A'
+              },
+              {
+                type: ElementType.DATE,
+                value: '',
+                dateFormat: 'yyyy-MM-dd',
+                valueList: [
+                  {
+                    value: '2026-04-09',
+                    color: '#bb2200'
+                  }
+                ]
+              },
+              {
+                value: 'B'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(run => ({
+        text: run.text,
+        color: run.color
+      })),
+      [
+        {
+          text: 'A',
+          color: '#000000'
+        },
+        {
+          text: '2026-04-09',
+          color: '#bb2200'
+        },
+        {
+          text: 'B',
+          color: '#000000'
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentMarksLatexAsPending() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -10699,6 +10953,9 @@ async function run() {
   await testLayoutDocumentResolvesSelectControlTextFromValueSets()
   await testLayoutDocumentInheritsTextControlStyles()
   await testLayoutDocumentAppendsTextControlBorder()
+  await testLayoutDocumentRendersDateControlValue()
+  await testLayoutDocumentRendersNumberControlValue()
+  await testLayoutDocumentRendersDateWrapperText()
   await testLayoutDocumentMarksLatexAsPending()
   await testLayoutDocumentMarksBlockIframeAndVideoAsPending()
   await testLayoutDocumentAppendsAreaDecorations()
