@@ -45,6 +45,37 @@ The first version does not guarantee:
 - elimination of all browser-environment assumptions
 - a reusable core layout refactor for non-PDF consumers
 
+## Deferred Scope
+
+The following content types are explicitly deferred and must not be treated as
+implemented in the current delivery scope:
+
+- `block iframe`
+- `block video`
+
+### Deferred Boundary
+
+For the current phase, the plugin must not claim support for:
+
+- external iframeBlock.src page export
+- iframeBlock.srcdoc browser-like runtime execution or interactive capture
+- video frame extraction in export
+- preservation of interactive iframe or video behavior inside PDF
+
+If these content types appear in exported documents, they should remain in the
+"recorded but not yet delivered" backlog rather than being described as fully
+supported layout coverage.
+
+### Re-entry Conditions
+
+`block iframe` and `block video` should only return to active implementation
+scope after a separate decision confirms:
+
+- the exact supported input boundary
+- the acceptable browser security constraints
+- the required fidelity level for dynamic runtime content
+- the fallback and timeout strategy for load failures
+
 ## Why the Current Direction Must Be Replaced
 
 The current `5d30670` implementation introduces PDF-specific core concepts such
@@ -683,3 +714,6 @@ It is an architectural replacement:
 - rebuild pagination inside the plugin
 - preserve visual fidelity through browser-canvas measurement
 - reserve raster fallback for the smallest unresolved local regions only
+
+
+

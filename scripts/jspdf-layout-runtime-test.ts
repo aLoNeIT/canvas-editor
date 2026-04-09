@@ -4480,11 +4480,9 @@ async function testLayoutDocumentRendersLatexAsImage() {
   }
 }
 
-async function testLayoutDocumentRendersIframeSrcdocAndVideo() {
+async function testLayoutDocumentMarksBlockIframeAndVideoAsPending() {
   const previousDocument = globalThis.document
-  const previousImage = globalThis.Image
   const runtimeGlobal = globalThis as any
-  const drawImageCallList: unknown[][] = []
 
   const ctx = {
     fillStyle: '#000000',
@@ -4500,66 +4498,32 @@ async function testLayoutDocumentRendersIframeSrcdocAndVideo() {
     fillRect() {
       return undefined
     },
-    clearRect() {
-      return undefined
-    },
     strokeRect() {
       return undefined
     },
     fillText() {
-      return undefined
-    },
-    drawImage(...args: unknown[]) {
-      drawImageCallList.push(args)
-      return undefined
-    }
-  }
-
-  class MockImage {
-    onload: null | (() => void) = null
-    onerror: null | (() => void) = null
-    set src(_value: string) {
-      this.onload?.()
-    }
-  }
-
-  class MockVideo {
-    onloadeddata: null | (() => void) = null
-    onerror: null | (() => void) = null
-    src = ''
-    muted = false
-    crossOrigin = ''
-    play() {
-      this.onloadeddata?.()
-      return Promise.resolve()
-    }
-    pause() {
       return undefined
     }
   }
 
   runtimeGlobal.document = {
     createElement(tagName: string) {
-      if (tagName === 'canvas') {
-        return {
-          width: 0,
-          height: 0,
-          getContext(type: string) {
-            if (type !== '2d') return null
-            return ctx
-          },
-          toDataURL() {
-            return 'data:image/png;base64,block-fallback'
-          }
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+      return {
+        width: 0,
+        height: 0,
+        getContext(type: string) {
+          if (type !== '2d') return null
+          return ctx
+        },
+        toDataURL() {
+          return 'data:image/png;base64,block-fallback'
         }
       }
-      if (tagName === 'video') {
-        return new MockVideo()
-      }
-      throw new Error(`Unexpected tag: ${tagName}`)
     }
   }
-  runtimeGlobal.Image = MockImage
 
   try {
     const pageList = await layoutDocument({
@@ -4649,12 +4613,9 @@ async function testLayoutDocumentRendersIframeSrcdocAndVideo() {
               block: {
                 type: BlockType.IFRAME,
                 iframeBlock: {
-                  srcdoc:
-                    '<div style="width:100%;height:100%;background:#eee">iframe</div>'
+                  src: 'https://example.com'
                 }
-              },
-              width: 60,
-              height: 40
+              }
             }
           },
           {
@@ -4681,24 +4642,14 @@ async function testLayoutDocumentRendersIframeSrcdocAndVideo() {
       }
     } as any)
 
-    assert.deepEqual(pageList[0].issues, [])
-    assert.equal(pageList[0].rasterBlocks.length, 2)
-    assert.equal(pageList[0].rasterBlocks[0]?.sourceType, 'image')
-    assert.equal(pageList[0].rasterBlocks[0]?.debugLabel, 'iframe')
-    assert.equal(
-      pageList[0].rasterBlocks[0]?.dataUrl,
-      'data:image/png;base64,block-fallback'
-    )
-    assert.equal(pageList[0].rasterBlocks[1]?.sourceType, 'image')
-    assert.equal(pageList[0].rasterBlocks[1]?.debugLabel, 'video')
-    assert.equal(
-      pageList[0].rasterBlocks[1]?.dataUrl,
-      'data:image/png;base64,block-fallback'
-    )
-    assert.equal(drawImageCallList.length, 2)
+    assert.deepEqual(pageList[0].issues, [
+      'pending:block-iframe',
+      'fallback:block',
+      'pending:block-video',
+      'fallback:block'
+    ])
   } finally {
     runtimeGlobal.document = previousDocument
-    runtimeGlobal.Image = previousImage
   }
 }
 
@@ -12162,7 +12113,7 @@ async function run() {
   await testLayoutDocumentRendersNumberControlValue()
   await testLayoutDocumentRendersDateWrapperText()
   await testLayoutDocumentRendersLatexAsImage()
-  await testLayoutDocumentRendersIframeSrcdocAndVideo()
+  await testLayoutDocumentMarksBlockIframeAndVideoAsPending()
   await testLayoutDocumentAppendsAreaDecorations()
   await testLayoutDocumentAppendsMainAndAreaBadges()
   await testLayoutDocumentAppendsGraffitiStrokes()
