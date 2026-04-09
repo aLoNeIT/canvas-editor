@@ -4480,7 +4480,7 @@ async function testLayoutDocumentRendersLatexAsImage() {
   }
 }
 
-async function testLayoutDocumentRendersIframeSrcdocAndMarksVideoPending() {
+async function testLayoutDocumentRendersIframeSrcdocAndVideo() {
   const previousDocument = globalThis.document
   const previousImage = globalThis.Image
   const runtimeGlobal = globalThis as any
@@ -4523,22 +4523,40 @@ async function testLayoutDocumentRendersIframeSrcdocAndMarksVideoPending() {
     }
   }
 
+  class MockVideo {
+    onloadeddata: null | (() => void) = null
+    onerror: null | (() => void) = null
+    src = ''
+    muted = false
+    crossOrigin = ''
+    play() {
+      this.onloadeddata?.()
+      return Promise.resolve()
+    }
+    pause() {
+      return undefined
+    }
+  }
+
   runtimeGlobal.document = {
     createElement(tagName: string) {
-      if (tagName !== 'canvas') {
-        throw new Error(`Unexpected tag: ${tagName}`)
-      }
-      return {
-        width: 0,
-        height: 0,
-        getContext(type: string) {
-          if (type !== '2d') return null
-          return ctx
-        },
-        toDataURL() {
-          return 'data:image/png;base64,block-fallback'
+      if (tagName === 'canvas') {
+        return {
+          width: 0,
+          height: 0,
+          getContext(type: string) {
+            if (type !== '2d') return null
+            return ctx
+          },
+          toDataURL() {
+            return 'data:image/png;base64,block-fallback'
+          }
         }
       }
+      if (tagName === 'video') {
+        return new MockVideo()
+      }
+      throw new Error(`Unexpected tag: ${tagName}`)
     }
   }
   runtimeGlobal.Image = MockImage
@@ -4663,17 +4681,21 @@ async function testLayoutDocumentRendersIframeSrcdocAndMarksVideoPending() {
       }
     } as any)
 
-    assert.deepEqual(pageList[0].issues, [
-      'pending:block-video',
-      'fallback:block'
-    ])
+    assert.deepEqual(pageList[0].issues, [])
+    assert.equal(pageList[0].rasterBlocks.length, 2)
     assert.equal(pageList[0].rasterBlocks[0]?.sourceType, 'image')
     assert.equal(pageList[0].rasterBlocks[0]?.debugLabel, 'iframe')
     assert.equal(
       pageList[0].rasterBlocks[0]?.dataUrl,
       'data:image/png;base64,block-fallback'
     )
-    assert.equal(drawImageCallList.length, 1)
+    assert.equal(pageList[0].rasterBlocks[1]?.sourceType, 'image')
+    assert.equal(pageList[0].rasterBlocks[1]?.debugLabel, 'video')
+    assert.equal(
+      pageList[0].rasterBlocks[1]?.dataUrl,
+      'data:image/png;base64,block-fallback'
+    )
+    assert.equal(drawImageCallList.length, 2)
   } finally {
     runtimeGlobal.document = previousDocument
     runtimeGlobal.Image = previousImage
@@ -12140,7 +12162,7 @@ async function run() {
   await testLayoutDocumentRendersNumberControlValue()
   await testLayoutDocumentRendersDateWrapperText()
   await testLayoutDocumentRendersLatexAsImage()
-  await testLayoutDocumentRendersIframeSrcdocAndMarksVideoPending()
+  await testLayoutDocumentRendersIframeSrcdocAndVideo()
   await testLayoutDocumentAppendsAreaDecorations()
   await testLayoutDocumentAppendsMainAndAreaBadges()
   await testLayoutDocumentAppendsGraffitiStrokes()

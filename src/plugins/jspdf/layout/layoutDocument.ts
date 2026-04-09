@@ -42,6 +42,7 @@ import { PDF_RENDER_STAGE } from '../render/renderStage'
 import type { IStyledTextPlacementLine } from './styledTextRunPlacement'
 import { createLatexRasterBlock } from './latex'
 import { canRenderIframeBlock, createIframeRasterBlock } from './iframe'
+import { canRenderVideoBlock, createVideoRasterBlock } from './video'
 
 const DEFAULT_TAB_WIDTH = 32
 
@@ -1996,6 +1997,21 @@ async function appendImageOrFallback(
   if (canRenderIframeBlock(block.element)) {
     page.rasterBlocks.push(
       await createIframeRasterBlock({
+        pageNo: page.pageNo,
+        stage,
+        x,
+        y,
+        width,
+        height,
+        element: block.element
+      })
+    )
+    return
+  }
+
+  if (canRenderVideoBlock(block.element)) {
+    page.rasterBlocks.push(
+      await createVideoRasterBlock({
         pageNo: page.pageNo,
         stage,
         x,
