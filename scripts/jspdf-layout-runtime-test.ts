@@ -10609,6 +10609,413 @@ function testRenderVectorLinesRendersWholePageVectorList() {
   ])
 }
 
+async function testRenderPdfBase64DispatchesOperationsInStageOrder() {
+  const jspdfModulePath = require.resolve('jspdf')
+  const songModulePath = require.resolve('../src/plugins/jspdf/assets/song.js')
+  const fontModulePath = require.resolve('../src/plugins/jspdf/font.js')
+  const renderImageModulePath = require.resolve(
+    '../src/plugins/jspdf/render/renderImage.js'
+  )
+  const renderTextModulePath = require.resolve(
+    '../src/plugins/jspdf/render/renderText.js'
+  )
+  const renderVectorModulePath = require.resolve(
+    '../src/plugins/jspdf/render/renderVector.js'
+  )
+  const renderPdfModulePath = require.resolve('../src/plugins/jspdf/renderPdf.js')
+
+  const originalSongModule = require.cache[songModulePath]
+  require.cache[songModulePath] = {
+    id: songModulePath,
+    filename: songModulePath,
+    loaded: true,
+    exports: {
+      SONG_TTF_URL: ''
+    }
+  } as any
+
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const jspdfModule = require(jspdfModulePath)
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const fontModule = require(fontModulePath)
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const renderImageModule = require(renderImageModulePath)
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const renderTextModule = require(renderTextModulePath)
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const renderVectorModule = require(renderVectorModulePath)
+
+  const originalJsPDF = jspdfModule.jsPDF
+  const originalDefaultJsPDF = jspdfModule.default
+  const originalBootstrapPdfFonts = fontModule.bootstrapPdfFonts
+  const originalRenderImages = renderImageModule.renderImages
+  const originalRenderTextRun = renderTextModule.renderTextRun
+  const originalRenderVectorLine = renderVectorModule.renderVectorLine
+  const callList: Array<{
+    kind: string
+    payload?: unknown
+  }> = []
+
+  class MockJsPDF {
+    GState: any
+
+    constructor(options: unknown) {
+      callList.push({
+        kind: 'ctor',
+        payload: options
+      })
+      this.GState = class {
+        constructor(payload: Record<string, unknown>) {
+          Object.assign(this, payload)
+        }
+      }
+    }
+
+    setGState(state: Record<string, unknown>) {
+      callList.push({
+        kind: 'gstate',
+        payload: state
+      })
+    }
+
+    setFillColor(color: string) {
+      callList.push({
+        kind: 'fill',
+        payload: color
+      })
+    }
+
+    rect(x: number, y: number, width: number, height: number, mode: string) {
+      callList.push({
+        kind: 'rect',
+        payload: {
+          x,
+          y,
+          width,
+          height,
+          mode
+        }
+      })
+    }
+
+    addPage(format: number[], orientation: string) {
+      callList.push({
+        kind: 'addPage',
+        payload: {
+          format,
+          orientation
+        }
+      })
+    }
+
+    link(
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      option: Record<string, unknown>
+    ) {
+      callList.push({
+        kind: 'link',
+        payload: {
+          x,
+          y,
+          width,
+          height,
+          option
+        }
+      })
+    }
+
+    output(type: string) {
+      callList.push({
+        kind: 'output',
+        payload: type
+      })
+      return 'data:application/pdf;filename=test.pdf;base64,QUJDRA=='
+    }
+  }
+
+  try {
+    jspdfModule.jsPDF = MockJsPDF
+    jspdfModule.default = MockJsPDF
+    fontModule.bootstrapPdfFonts = async () => ({
+      defaultFontFamily: 'MockSong'
+    })
+    renderImageModule.renderImages = async (_doc: unknown, rasterList: unknown[]) => {
+      callList.push({
+        kind: 'raster',
+        payload: rasterList
+      })
+    }
+    renderTextModule.renderTextRun = (
+      _doc: unknown,
+      run: unknown,
+      defaultFontFamily: string
+    ) => {
+      callList.push({
+        kind: 'text',
+        payload: {
+          run,
+          defaultFontFamily
+        }
+      })
+    }
+    renderVectorModule.renderVectorLine = (_doc: unknown, line: unknown) => {
+      callList.push({
+        kind: 'vector',
+        payload: line
+      })
+    }
+
+    delete require.cache[renderPdfModulePath]
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { renderPdfBase64 } = require(renderPdfModulePath)
+
+    const base64 = await renderPdfBase64([
+      {
+        pageNo: 0,
+        width: 100,
+        height: 200,
+        highlightRects: [
+          {
+            pageNo: 0,
+            stage: 10,
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+            color: '#ffeeaa',
+            opacity: 0.5
+          }
+        ],
+        rasterBlocks: [
+          {
+            pageNo: 0,
+            stage: 20,
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 40,
+            dataUrl: 'image-1'
+          }
+        ],
+        textRuns: [
+          {
+            pageNo: 0,
+            stage: 30,
+            text: 'Hello',
+            x: 11,
+            y: 22,
+            width: 50,
+            height: 20,
+            font: 'Song',
+            size: 12,
+            color: '#000000'
+          }
+        ],
+        vectorLines: [
+          {
+            pageNo: 0,
+            stage: 40,
+            x1: 5,
+            y1: 6,
+            x2: 7,
+            y2: 8,
+            color: '#123456'
+          }
+        ],
+        links: [
+          {
+            pageNo: 0,
+            stage: 50,
+            x: 9,
+            y: 10,
+            width: 11,
+            height: 12,
+            url: 'https://example.com'
+          }
+        ],
+        issues: []
+      },
+      {
+        pageNo: 1,
+        width: 220,
+        height: 120,
+        highlightRects: [],
+        rasterBlocks: [],
+        textRuns: [
+          {
+            pageNo: 1,
+            stage: 30,
+            text: 'P2',
+            x: 15,
+            y: 25,
+            width: 20,
+            height: 20,
+            font: 'Song',
+            size: 12,
+            color: '#111111'
+          }
+        ],
+        vectorLines: [],
+        links: [],
+        issues: []
+      }
+    ])
+
+    assert.equal(base64, 'QUJDRA==')
+    assert.deepEqual(
+      callList.map(item => {
+        if (item.kind === 'gstate') {
+          return {
+            kind: item.kind,
+            payload: {
+              opacity: (item.payload as Record<string, unknown>).opacity
+            }
+          }
+        }
+        return item
+      }),
+      [
+      {
+        kind: 'ctor',
+        payload: {
+          orientation: 'portrait',
+          unit: 'pt',
+          format: [100, 200]
+        }
+      },
+      {
+        kind: 'gstate',
+        payload: {
+          opacity: 0.5
+        }
+      },
+      {
+        kind: 'fill',
+        payload: '#ffeeaa'
+      },
+      {
+        kind: 'rect',
+        payload: {
+          x: 1,
+          y: 2,
+          width: 3,
+          height: 4,
+          mode: 'F'
+        }
+      },
+      {
+        kind: 'gstate',
+        payload: {
+          opacity: 1
+        }
+      },
+      {
+        kind: 'raster',
+        payload: [
+          {
+            pageNo: 0,
+            stage: 20,
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 40,
+            dataUrl: 'image-1'
+          }
+        ]
+      },
+      {
+        kind: 'text',
+        payload: {
+          run: {
+            pageNo: 0,
+            stage: 30,
+            text: 'Hello',
+            x: 11,
+            y: 22,
+            width: 50,
+            height: 20,
+            font: 'Song',
+            size: 12,
+            color: '#000000'
+          },
+          defaultFontFamily: 'MockSong'
+        }
+      },
+      {
+        kind: 'vector',
+        payload: {
+          pageNo: 0,
+          stage: 40,
+          x1: 5,
+          y1: 6,
+          x2: 7,
+          y2: 8,
+          color: '#123456'
+        }
+      },
+      {
+        kind: 'link',
+        payload: {
+          x: 9,
+          y: 10,
+          width: 11,
+          height: 12,
+          option: {
+            url: 'https://example.com'
+          }
+        }
+      },
+      {
+        kind: 'addPage',
+        payload: {
+          format: [220, 120],
+          orientation: 'landscape'
+        }
+      },
+      {
+        kind: 'text',
+        payload: {
+          run: {
+            pageNo: 1,
+            stage: 30,
+            text: 'P2',
+            x: 15,
+            y: 25,
+            width: 20,
+            height: 20,
+            font: 'Song',
+            size: 12,
+            color: '#111111'
+          },
+          defaultFontFamily: 'MockSong'
+        }
+      },
+      {
+        kind: 'output',
+        payload: 'datauristring'
+      }
+      ]
+    )
+  } finally {
+    jspdfModule.jsPDF = originalJsPDF
+    jspdfModule.default = originalDefaultJsPDF
+    fontModule.bootstrapPdfFonts = originalBootstrapPdfFonts
+    renderImageModule.renderImages = originalRenderImages
+    renderTextModule.renderTextRun = originalRenderTextRun
+    renderVectorModule.renderVectorLine = originalRenderVectorLine
+    delete require.cache[renderPdfModulePath]
+    delete require.cache[fontModulePath]
+    if (originalSongModule) {
+      require.cache[songModulePath] = originalSongModule
+    } else {
+      delete require.cache[songModulePath]
+    }
+  }
+}
+
 async function testRenderImagesAppliesCropBeforeAddingImage() {
   const previousImage = globalThis.Image
   const previousDocument = globalThis.document
@@ -11181,6 +11588,7 @@ async function run() {
   testRenderTextRunsAppliesLetterSpacingCharSpace()
   testRenderVectorLineAppliesDashAndResetsSolidStroke()
   testRenderVectorLinesRendersWholePageVectorList()
+  await testRenderPdfBase64DispatchesOperationsInStageOrder()
   await testRenderImagesAppliesCropBeforeAddingImage()
 }
 
