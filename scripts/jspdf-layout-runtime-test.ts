@@ -4480,9 +4480,11 @@ async function testLayoutDocumentRendersLatexAsImage() {
   }
 }
 
-async function testLayoutDocumentMarksBlockIframeAndVideoAsPending() {
+async function testLayoutDocumentRendersIframeSrcdocAndMarksVideoPending() {
   const previousDocument = globalThis.document
+  const previousImage = globalThis.Image
   const runtimeGlobal = globalThis as any
+  const drawImageCallList: unknown[][] = []
 
   const ctx = {
     fillStyle: '#000000',
@@ -4498,11 +4500,26 @@ async function testLayoutDocumentMarksBlockIframeAndVideoAsPending() {
     fillRect() {
       return undefined
     },
+    clearRect() {
+      return undefined
+    },
     strokeRect() {
       return undefined
     },
     fillText() {
       return undefined
+    },
+    drawImage(...args: unknown[]) {
+      drawImageCallList.push(args)
+      return undefined
+    }
+  }
+
+  class MockImage {
+    onload: null | (() => void) = null
+    onerror: null | (() => void) = null
+    set src(_value: string) {
+      this.onload?.()
     }
   }
 
@@ -4524,6 +4541,7 @@ async function testLayoutDocumentMarksBlockIframeAndVideoAsPending() {
       }
     }
   }
+  runtimeGlobal.Image = MockImage
 
   try {
     const pageList = await layoutDocument({
@@ -4613,9 +4631,12 @@ async function testLayoutDocumentMarksBlockIframeAndVideoAsPending() {
               block: {
                 type: BlockType.IFRAME,
                 iframeBlock: {
-                  src: 'https://example.com'
+                  srcdoc:
+                    '<div style="width:100%;height:100%;background:#eee">iframe</div>'
                 }
-              }
+              },
+              width: 60,
+              height: 40
             }
           },
           {
@@ -4643,13 +4664,19 @@ async function testLayoutDocumentMarksBlockIframeAndVideoAsPending() {
     } as any)
 
     assert.deepEqual(pageList[0].issues, [
-      'pending:block-iframe',
-      'fallback:block',
       'pending:block-video',
       'fallback:block'
     ])
+    assert.equal(pageList[0].rasterBlocks[0]?.sourceType, 'image')
+    assert.equal(pageList[0].rasterBlocks[0]?.debugLabel, 'iframe')
+    assert.equal(
+      pageList[0].rasterBlocks[0]?.dataUrl,
+      'data:image/png;base64,block-fallback'
+    )
+    assert.equal(drawImageCallList.length, 1)
   } finally {
     runtimeGlobal.document = previousDocument
+    runtimeGlobal.Image = previousImage
   }
 }
 
@@ -12113,7 +12140,7 @@ async function run() {
   await testLayoutDocumentRendersNumberControlValue()
   await testLayoutDocumentRendersDateWrapperText()
   await testLayoutDocumentRendersLatexAsImage()
-  await testLayoutDocumentMarksBlockIframeAndVideoAsPending()
+  await testLayoutDocumentRendersIframeSrcdocAndMarksVideoPending()
   await testLayoutDocumentAppendsAreaDecorations()
   await testLayoutDocumentAppendsMainAndAreaBadges()
   await testLayoutDocumentAppendsGraffitiStrokes()
