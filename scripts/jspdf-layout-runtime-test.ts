@@ -63,6 +63,9 @@ import {
 } from '../src/plugins/jspdf/source/badgeState.js'
 import { ListStyle, ListType } from '../src/editor/dataset/enum/List.js'
 import { TitleLevel } from '../src/editor/dataset/enum/Title.js'
+import { EditorMode } from '../src/editor/dataset/enum/Editor.js'
+import { assertNoFallback } from '../src/plugins/jspdf/debug/assertNoFallback.js'
+import { collectDiagnostics } from '../src/plugins/jspdf/debug/collectDiagnostics.js'
 
 function createMeasureWidth(unitWidth = 10) {
   return (text: string) => text.length * unitWidth
@@ -70,6 +73,184 @@ function createMeasureWidth(unitWidth = 10) {
 
 function roundTo3(value: number) {
   return Math.round(value * 1000) / 1000
+}
+
+function createJspdfPageModel(overrides: Record<string, unknown> = {}) {
+  return {
+    pageNo: 0,
+    width: 120,
+    height: 100,
+    highlightRects: [],
+    rasterBlocks: [],
+    textRuns: [
+      {
+        pageNo: 0,
+        stage: 10,
+        text: 'x',
+        x: 10,
+        y: 20,
+        width: 10,
+        height: 12,
+        font: 'Song',
+        size: 12,
+        color: '#000000'
+      }
+    ],
+    vectorLines: [],
+    links: [],
+    issues: [],
+    ...overrides
+  }
+}
+
+function createCachedModule(path: string, exports: unknown) {
+  return {
+    id: path,
+    filename: path,
+    loaded: true,
+    exports
+  }
+}
+
+function createJspdfPluginCommandHarness(
+  options: {
+    pageModels?: any[]
+    source?: unknown
+    documentModel?: unknown
+    renderPdfResult?: string
+  } = {}
+) {
+  const editorModulePath = require.resolve('../src/editor/index.js')
+  const indexModulePath = require.resolve('../src/plugins/jspdf/index.js')
+  const readEditorStateModulePath = require.resolve(
+    '../src/plugins/jspdf/source/readEditorState.js'
+  )
+  const normalizeDocumentModulePath = require.resolve(
+    '../src/plugins/jspdf/normalize/normalizeDocument.js'
+  )
+  const layoutDocumentModulePath = require.resolve(
+    '../src/plugins/jspdf/layout/layoutDocument.js'
+  )
+  const renderPdfModulePath = require.resolve('../src/plugins/jspdf/renderPdf.js')
+
+  const originalModuleMap = new Map<string, NodeJS.Module | undefined>()
+  const modulePathList = [
+    editorModulePath,
+    readEditorStateModulePath,
+    normalizeDocumentModulePath,
+    layoutDocumentModulePath,
+    renderPdfModulePath
+  ]
+  for (const modulePath of modulePathList) {
+    originalModuleMap.set(modulePath, require.cache[modulePath])
+  }
+
+  const callList: Array<{
+    kind: string
+    payload?: unknown
+  }> = []
+  const source = options.source || {
+    kind: 'source'
+  }
+  const documentModel = options.documentModel || {
+    kind: 'document-model'
+  }
+  const pageModels = options.pageModels || []
+  const renderPdfResult = options.renderPdfResult || 'mock-base64'
+
+  require.cache[editorModulePath] = createCachedModule(editorModulePath, {
+    __esModule: true,
+    default: class MockEditor {},
+    Command: class MockCommand {},
+    EditorMode,
+    PaperDirection: {
+      VERTICAL: 'vertical',
+      HORIZONTAL: 'horizontal'
+    }
+  }) as NodeJS.Module
+  require.cache[readEditorStateModulePath] = createCachedModule(
+    readEditorStateModulePath,
+    {
+      readEditorState(editor: unknown, finalOption: unknown) {
+        callList.push({
+          kind: 'readEditorState',
+          payload: {
+            editor,
+            finalOption
+          }
+        })
+        return source
+      }
+    }
+  ) as NodeJS.Module
+  require.cache[normalizeDocumentModulePath] = createCachedModule(
+    normalizeDocumentModulePath,
+    {
+      normalizeDocument(payload: unknown) {
+        callList.push({
+          kind: 'normalizeDocument',
+          payload
+        })
+        return documentModel
+      }
+    }
+  ) as NodeJS.Module
+  require.cache[layoutDocumentModulePath] = createCachedModule(
+    layoutDocumentModulePath,
+    {
+      async layoutDocument(payload: unknown) {
+        callList.push({
+          kind: 'layoutDocument',
+          payload
+        })
+        return pageModels
+      }
+    }
+  ) as NodeJS.Module
+  require.cache[renderPdfModulePath] = createCachedModule(renderPdfModulePath, {
+    async renderPdfBase64(payload: unknown, finalOption: unknown) {
+      callList.push({
+        kind: 'renderPdfBase64',
+        payload: {
+          pageModels: payload,
+          finalOption
+        }
+      })
+      return renderPdfResult
+    }
+  }) as NodeJS.Module
+
+  delete require.cache[indexModulePath]
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { jspdfPlugin } = require(indexModulePath)
+
+  const editor = {
+    command: {
+      executeSetMainBadge(payload: unknown) {
+        return payload
+      },
+      executeSetAreaBadge(payload: unknown[]) {
+        return payload.length
+      }
+    }
+  }
+
+  return {
+    callList,
+    editor,
+    jspdfPlugin,
+    restore() {
+      delete require.cache[indexModulePath]
+      for (const modulePath of modulePathList) {
+        const originalModule = originalModuleMap.get(modulePath)
+        if (originalModule) {
+          require.cache[modulePath] = originalModule
+        } else {
+          delete require.cache[modulePath]
+        }
+      }
+    }
+  }
 }
 
 function testWrapsLongTextByWidth() {
@@ -11465,6 +11646,320 @@ function testLayoutTableComputesSpanGeometry() {
   )
 }
 
+function testAssertNoFallbackIgnoresImageRasterBlocks() {
+  assert.doesNotThrow(() =>
+    assertNoFallback([
+      createJspdfPageModel({
+        rasterBlocks: [
+          {
+            pageNo: 0,
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 40,
+            dataUrl: 'data:image/png;base64,abc',
+            sourceType: 'image'
+          }
+        ]
+      }) as any
+    ])
+  )
+}
+
+function testAssertNoFallbackReportsPendingRasterBlocks() {
+  assert.throws(
+    () =>
+      assertNoFallback([
+        createJspdfPageModel({
+          pageNo: 1,
+          rasterBlocks: [
+            {
+              pageNo: 1,
+              x: 10,
+              y: 20,
+              width: 30,
+              height: 40,
+              dataUrl: '',
+              sourceType: 'latex'
+            }
+          ]
+        }) as any
+      ]),
+    /page 2:latex/
+  )
+}
+
+function testCollectDiagnosticsAggregatesFallbackBlocksAndWarnings() {
+  const firstFallback = {
+    pageNo: 0,
+    x: 10,
+    y: 20,
+    width: 30,
+    height: 40,
+    dataUrl: '',
+    sourceType: 'latex'
+  }
+  const secondFallback = {
+    pageNo: 1,
+    x: 15,
+    y: 25,
+    width: 35,
+    height: 45,
+    dataUrl: '',
+    sourceType: 'video'
+  }
+
+  const diagnostics = collectDiagnostics([
+    createJspdfPageModel({
+      rasterBlocks: [firstFallback],
+      issues: ['first warning']
+    }) as any,
+    createJspdfPageModel({
+      pageNo: 1,
+      rasterBlocks: [secondFallback],
+      issues: ['second warning']
+    }) as any
+  ])
+
+  assert.deepEqual(diagnostics, {
+    pageCount: 2,
+    fallbackBlocks: [firstFallback, secondFallback],
+    layoutWarnings: ['first warning', 'second warning']
+  })
+}
+
+async function testJspdfPluginReturnsDiagnosticsFromPageModels() {
+  const pageModels = [
+    createJspdfPageModel({
+      rasterBlocks: [
+        {
+          pageNo: 0,
+          x: 10,
+          y: 20,
+          width: 30,
+          height: 40,
+          dataUrl: '',
+          sourceType: 'latex'
+        }
+      ],
+      issues: ['layout warning']
+    })
+  ]
+  const harness = createJspdfPluginCommandHarness({
+    pageModels
+  })
+
+  try {
+    harness.jspdfPlugin(harness.editor as any, {
+      defaultFontFamily: 'PluginSong'
+    })
+
+    const diagnostics = await (
+      harness.editor.command as any
+    ).executeExportPdfDiagnostics({
+      mode: EditorMode.READONLY
+    })
+
+    assert.deepEqual(diagnostics, {
+      pageCount: 1,
+      fallbackBlocks: pageModels[0].rasterBlocks,
+      layoutWarnings: ['layout warning']
+    })
+    assert.deepEqual(
+      harness.callList.map(item => item.kind),
+      ['readEditorState', 'normalizeDocument', 'layoutDocument']
+    )
+    assert.deepEqual(harness.callList[0].payload, {
+      editor: harness.editor,
+      finalOption: {
+        defaultFontFamily: 'PluginSong',
+        mode: EditorMode.READONLY
+      }
+    })
+  } finally {
+    harness.restore()
+  }
+}
+
+async function testJspdfPluginRejectsNonPrintExportMode() {
+  const harness = createJspdfPluginCommandHarness()
+
+  try {
+    harness.jspdfPlugin(harness.editor as any)
+
+    await assert.rejects(
+      () =>
+        (harness.editor.command as any).executeExportPdfBase64({
+          mode: EditorMode.EDIT
+        }),
+      /requires print mode layout/
+    )
+    assert.equal(harness.callList.length, 0)
+  } finally {
+    harness.restore()
+  }
+}
+
+async function testJspdfPluginRejectsMissingPageModels() {
+  const harness = createJspdfPluginCommandHarness({
+    pageModels: []
+  })
+
+  try {
+    harness.jspdfPlugin(harness.editor as any)
+
+    await assert.rejects(
+      () => (harness.editor.command as any).executeExportPdfBase64(),
+      /no page models were generated/
+    )
+    assert.deepEqual(
+      harness.callList.map(item => item.kind),
+      ['readEditorState', 'normalizeDocument', 'layoutDocument']
+    )
+  } finally {
+    harness.restore()
+  }
+}
+
+async function testJspdfPluginDebugRejectsFallbackBlocks() {
+  const harness = createJspdfPluginCommandHarness({
+    pageModels: [
+      createJspdfPageModel({
+        rasterBlocks: [
+          {
+            pageNo: 0,
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 40,
+            dataUrl: '',
+            sourceType: 'latex'
+          }
+        ]
+      })
+    ]
+  })
+
+  try {
+    harness.jspdfPlugin(harness.editor as any, {
+      debug: true
+    })
+
+    await assert.rejects(
+      () => (harness.editor.command as any).executeExportPdfBase64(),
+      /fallback detected: page 1:latex/
+    )
+    assert.deepEqual(
+      harness.callList.map(item => item.kind),
+      ['readEditorState', 'normalizeDocument', 'layoutDocument']
+    )
+  } finally {
+    harness.restore()
+  }
+}
+
+async function testJspdfPluginDebugRejectsLayoutWarnings() {
+  const harness = createJspdfPluginCommandHarness({
+    pageModels: [
+      createJspdfPageModel({
+        issues: ['overflow warning']
+      })
+    ]
+  })
+
+  try {
+    harness.jspdfPlugin(harness.editor as any, {
+      debug: true
+    })
+
+    await assert.rejects(
+      () => (harness.editor.command as any).executeExportPdfBase64(),
+      /PDF export debug: overflow warning/
+    )
+    assert.deepEqual(
+      harness.callList.map(item => item.kind),
+      ['readEditorState', 'normalizeDocument', 'layoutDocument']
+    )
+  } finally {
+    harness.restore()
+  }
+}
+
+async function testJspdfPluginDebugRejectsEmptyRenderedPage() {
+  const harness = createJspdfPluginCommandHarness({
+    pageModels: [
+      createJspdfPageModel({
+        textRuns: [],
+        highlightRects: [],
+        vectorLines: [],
+        rasterBlocks: [],
+        links: []
+      })
+    ]
+  })
+
+  try {
+    harness.jspdfPlugin(harness.editor as any, {
+      debug: true
+    })
+
+    await assert.rejects(
+      () => (harness.editor.command as any).executeExportPdfBase64(),
+      /page 1 produced no output/
+    )
+    assert.deepEqual(
+      harness.callList.map(item => item.kind),
+      ['readEditorState', 'normalizeDocument', 'layoutDocument']
+    )
+  } finally {
+    harness.restore()
+  }
+}
+
+async function testJspdfPluginRenderPdfPassesThroughInNormalMode() {
+  const pageModels = [
+    createJspdfPageModel({
+      pageNo: 0
+    })
+  ]
+  const harness = createJspdfPluginCommandHarness({
+    pageModels,
+    renderPdfResult: 'QUJDRA=='
+  })
+
+  try {
+    harness.jspdfPlugin(harness.editor as any, {
+      defaultFontFamily: 'PluginSong'
+    })
+
+    const result = await (harness.editor.command as any).executeExportPdfBase64(
+      {
+        paperDirection: 'horizontal' as any
+      }
+    )
+
+    assert.equal(result, 'QUJDRA==')
+    assert.deepEqual(
+      harness.callList.map(item => item.kind),
+      [
+        'readEditorState',
+        'normalizeDocument',
+        'layoutDocument',
+        'renderPdfBase64'
+      ]
+    )
+    assert.deepEqual(harness.callList[3].payload, {
+      pageModels,
+      finalOption: {
+        defaultFontFamily: 'PluginSong',
+        paperDirection: 'horizontal'
+      }
+    })
+  } finally {
+    harness.restore()
+  }
+}
+
 async function run() {
   testWrapsLongTextByWidth()
   testPreservesExplicitLineBreaks()
@@ -11584,6 +12079,16 @@ async function run() {
   testDrawsTdSlashLines()
   testLayoutTableAssignsColumnIndexAfterLeadingRowspan()
   testLayoutTableComputesSpanGeometry()
+  testAssertNoFallbackIgnoresImageRasterBlocks()
+  testAssertNoFallbackReportsPendingRasterBlocks()
+  testCollectDiagnosticsAggregatesFallbackBlocksAndWarnings()
+  await testJspdfPluginReturnsDiagnosticsFromPageModels()
+  await testJspdfPluginRejectsNonPrintExportMode()
+  await testJspdfPluginRejectsMissingPageModels()
+  await testJspdfPluginDebugRejectsFallbackBlocks()
+  await testJspdfPluginDebugRejectsLayoutWarnings()
+  await testJspdfPluginDebugRejectsEmptyRenderedPage()
+  await testJspdfPluginRenderPdfPassesThroughInNormalMode()
   testResolvesPdfBoldItalicFontStyle()
   testRenderTextRunsAppliesLetterSpacingCharSpace()
   testRenderVectorLineAppliesDashAndResetsSolidStroke()
