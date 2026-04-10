@@ -55,6 +55,7 @@ import {
   renderVectorLine,
   renderVectorLines
 } from '../src/plugins/jspdf/render/renderVector.js'
+import { registerPdfFontStyles } from '../src/plugins/jspdf/fontRegistration.js'
 import { createTextPlacements } from '../src/plugins/jspdf/layout/textPlacement.js'
 import { wrapText } from '../src/plugins/jspdf/layout/wrapText.js'
 import {
@@ -110,6 +111,38 @@ function createCachedModule(path: string, exports: unknown) {
     loaded: true,
     exports
   }
+}
+
+async function testBootstrapPdfFontsRegistersAllTextStyles() {
+  const addFontCallList: Array<{ family: string; style: string }> = []
+  const fontMap = new Map<string, Record<string, string>>()
+
+  const doc = {
+    getFontList() {
+      return Object.fromEntries(fontMap.entries())
+    },
+    addFont(_filename: string, family: string, style: string) {
+      addFontCallList.push({
+        family,
+        style
+      })
+      const styleMap = fontMap.get(family) || {}
+      styleMap[style] = family
+      fontMap.set(family, styleMap)
+    },
+    setFont() {
+      return undefined
+    }
+  }
+
+  registerPdfFontStyles(doc as any, 'SimSun.ttf', 'SimSun')
+
+  assert.deepEqual(
+    addFontCallList
+      .filter(call => call.family === 'SimSun')
+      .map(call => call.style),
+    ['normal', 'bold', 'italic', 'bolditalic']
+  )
 }
 
 function createJspdfPluginCommandHarness(
@@ -12068,6 +12101,7 @@ async function testJspdfPluginRenderPdfPassesThroughInNormalMode() {
 }
 
 async function run() {
+  await testBootstrapPdfFontsRegistersAllTextStyles()
   testWrapsLongTextByWidth()
   testPreservesExplicitLineBreaks()
   testExpandsTableRowHeightForWrappedCellText()

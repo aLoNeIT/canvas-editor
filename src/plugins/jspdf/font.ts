@@ -1,5 +1,6 @@
 import type jsPDF from 'jspdf'
 import { SONG_TTF_URL } from './assets/song'
+import { registerPdfFontStyles } from './fontRegistration'
 import { resolvePdfFontFamily } from './render/fontFamily'
 
 export interface IFontBootstrapOption {
@@ -9,7 +10,6 @@ export interface IFontBootstrapOption {
 }
 
 const urlToBase64Cache = new Map<string, Promise<string>>()
-
 function warn(debug: boolean | undefined, message: string, error?: unknown) {
   if (!debug) return
   if (error) {
@@ -79,7 +79,7 @@ async function registerSongFallback(doc: jsPDF, debug?: boolean) {
       const base64 = await loadUrlAsBase64(SONG_TTF_URL)
       doc.addFileToVFS(filename, base64)
     }
-    doc.addFont(filename, 'Song', 'normal')
+    registerPdfFontStyles(doc, filename, 'Song')
     ;(doc as any)[marker] = true
   } catch (e) {
     warn(debug, 'Failed to register Song fallback font', e)
@@ -98,7 +98,7 @@ async function registerFontFromUrl(
     if (!doc.existsFileInVFS(filename)) {
       doc.addFileToVFS(filename, base64)
     }
-    doc.addFont(filename, fontFamily, 'normal')
+    registerPdfFontStyles(doc, filename, fontFamily)
   } catch (e) {
     warn(debug, `Failed to register font '${fontFamily}' from URL`, e)
   }
