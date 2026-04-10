@@ -645,7 +645,7 @@ export async function renderPdfBase64(pageModels: IPageModel[], options: IRender
 // cypress/e2e/jspdf/export.cy.ts
 describe('jspdf export', () => {
   beforeEach(() => {
-    cy.visit('http://localhost:3000/canvas-editor/')
+    cy.visit('http://localhost:8100/canvas-editor/')
   })
 
   it('does not expose getPdfExportSnapshot on command', () => {

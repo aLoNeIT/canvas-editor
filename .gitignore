@@ -8,3 +8,4 @@ dist-ssr
 cache
 .temp
 .tmp-jspdf-runtime-test
+.*

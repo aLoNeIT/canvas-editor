@@ -74,34 +74,35 @@ window.onload = function () {
   Reflect.set(window, 'editor', instance)
   // canvas-editor-devtools使用
   Reflect.set(window, '__CANVAS_EDITOR_INSTANCE__', instance)
+  const exportPdfBase64 = async () => {
+    const pdfBase64 = await (
+      instance.command as CommandWithJspdf
+    ).executeExportPdfBase64()
+    const pdfHeader = atob(pdfBase64).slice(0, 4)
+    console.log('pdf header', pdfHeader)
+    console.log('pdf base64 length', pdfBase64.length)
+    return pdfBase64
+  }
+  const exportPdf = async () => {
+    const pdfBase64 = await exportPdfBase64()
+    const pdfBinary = atob(pdfBase64)
+    const bytes = Uint8Array.from(pdfBinary, char => char.charCodeAt(0))
+    const blob = new Blob([bytes], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'canvas-editor-export.pdf'
+    document.body.append(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
   if (import.meta.env.DEV) {
-    const exportPdfBase64 = async () => {
-      const pdfBase64 = await (
-        instance.command as CommandWithJspdf
-      ).executeExportPdfBase64()
-      const pdfHeader = atob(pdfBase64).slice(0, 4)
-      console.log('pdf header', pdfHeader)
-      console.log('pdf base64 length', pdfBase64.length)
-      return pdfBase64
-    }
     Reflect.set(window, '__exportPdfBase64', exportPdfBase64)
     Reflect.set(window, '__exportPdfDiagnostics', () =>
       (instance.command as CommandWithJspdf).executeExportPdfDiagnostics()
     )
-    Reflect.set(window, '__exportPdf', async () => {
-      const pdfBase64 = await exportPdfBase64()
-      const pdfBinary = atob(pdfBase64)
-      const bytes = Uint8Array.from(pdfBinary, char => char.charCodeAt(0))
-      const blob = new Blob([bytes], { type: 'application/pdf' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = 'canvas-editor-export.pdf'
-      document.body.append(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
-    })
+    Reflect.set(window, '__exportPdf', exportPdf)
   }
 
   // 菜单弹窗销毁
@@ -1296,6 +1297,14 @@ window.onload = function () {
   }
 
   // 6. 目录显隐 | 页面模式 | 纸张缩放 | 纸张大小 | 纸张方向 | 页边距 | 全屏 | 设置
+  const exportPdfDom =
+    document.querySelector<HTMLDivElement>('.menu-item__export-pdf')!
+  exportPdfDom.title = '导出 PDF'
+  exportPdfDom.onclick = function () {
+    console.log('export-pdf')
+    exportPdf()
+  }
+
   const editorOptionDom =
     document.querySelector<HTMLDivElement>('.editor-option')!
   editorOptionDom.onclick = function () {
