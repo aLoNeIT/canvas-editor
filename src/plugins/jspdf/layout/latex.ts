@@ -1,6 +1,6 @@
 import { ElementType } from '../../../editor/dataset/enum/Element'
-import { LaTexParticle } from '../../../editor/core/draw/particle/latex/LaTexParticle'
 import type { IElement } from '../../../editor/interface/Element'
+import { convertLatexToSvg } from '../../../editor/utils/latex'
 import type { IPdfRasterBlock } from '../types'
 
 interface IResolvedLatexAsset {
@@ -19,7 +19,7 @@ export function resolveLatexAsset(
   const resolved =
     element.laTexSVG && element.width && element.height
       ? null
-      : LaTexParticle.convertLaTextToSVG(element.value || '')
+      : convertLatexToSvg(element.value || '')
 
   return {
     width: element.width || resolved?.width || 1,

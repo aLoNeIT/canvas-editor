@@ -1,15 +1,11 @@
 import { IElement } from '../../../../interface/Element'
+import { convertLatexToSvg } from '../../../../utils/latex'
 import { ImageParticle } from '../ImageParticle'
-import { LaTexSVG, LaTexUtils } from './utils/LaTexUtils'
+import type { LaTexSVG } from './utils/LaTexUtils'
 
 export class LaTexParticle extends ImageParticle {
   public static convertLaTextToSVG(laTex: string): LaTexSVG {
-    return new LaTexUtils(laTex).svg({
-      SCALE_X: 10,
-      SCALE_Y: 10,
-      MARGIN_X: 0,
-      MARGIN_Y: 0
-    })
+    return convertLatexToSvg(laTex)
   }
 
   public render(

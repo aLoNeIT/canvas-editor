@@ -10,7 +10,7 @@ import {
   splitText
 } from '.'
 import { IFrameBlock } from '../core/draw/particle/block/modules/IFrameBlock'
-import { LaTexParticle } from '../core/draw/particle/latex/LaTexParticle'
+import { convertLatexToSvg } from './latex'
 import { NON_BREAKING_SPACE, ZERO } from '../dataset/constant/Common'
 import {
   AREA_CONTEXT_ATTR,
@@ -565,7 +565,7 @@ export function formatElementList(
       el.id = el.id || getUUID()
     }
     if (el.type === ElementType.LATEX) {
-      const { svg, width, height } = LaTexParticle.convertLaTextToSVG(el.value)
+      const { svg, width, height } = convertLatexToSvg(el.value)
       el.width = el.width || width
       el.height = el.height || height
       el.laTexSVG = svg
