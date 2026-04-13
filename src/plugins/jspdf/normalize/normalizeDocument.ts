@@ -9,6 +9,8 @@ import { ElementType } from '../../../editor/dataset/enum/Element'
 import { TitleLevel } from '../../../editor/dataset/enum/Title'
 import { resolveLatexAsset } from '../layout/latex'
 
+let syntheticListIdSeed = 0
+
 function getBlockKind(element: IDocumentBlockNode['element']): IDocumentBlockNode['kind'] {
   switch (element.type) {
     case 'table':
@@ -46,8 +48,8 @@ function isHiddenElement(element: IDocumentBlockNode['element']) {
   return Boolean(element.hide || element.control?.hide || element.area?.hide)
 }
 
-function mergeAreaIntoChild(
-  area: IDocumentBlockNode['element'],
+function mergeWrapperIntoChild(
+  wrapper: IDocumentBlockNode['element'],
   child: IDocumentBlockNode['element']
 ) {
   const {
@@ -55,7 +57,7 @@ function mergeAreaIntoChild(
     value: _value,
     valueList: _valueList,
     ...inherited
-  } = area
+  } = wrapper
   void _type
   void _value
   void _valueList
@@ -67,21 +69,28 @@ function mergeAreaIntoChild(
 }
 
 function normalizeValueList(
-  elementList: IJspdfSourceState['result']['data']['main']
+  elementList: IJspdfSourceState['result']['data']['main'],
+  defaultHyperlinkColor: string
 ): IJspdfSourceState['result']['data']['main'] {
   return elementList.flatMap(element => {
     if (isHiddenElement(element)) {
       return []
     }
 
-    const normalizedElement = normalizeElement(element)
+    const normalizedElement = normalizeElement(
+      element,
+      defaultHyperlinkColor
+    )
 
     if (!normalizedElement.valueList?.length) {
       return [normalizedElement]
     }
 
     if (!isVirtualWrapperElement(normalizedElement)) {
-      const normalizedChildren = normalizeValueList(normalizedElement.valueList)
+      const normalizedChildren = normalizeValueList(
+        normalizedElement.valueList,
+        defaultHyperlinkColor
+      )
       return [
         {
           ...normalizedElement,
@@ -93,28 +102,42 @@ function normalizeValueList(
     if (isFlattenWrapperElement(normalizedElement)) {
       return normalizeValueList(
         normalizedElement.valueList.map(child =>
-          mergeAreaIntoChild(normalizedElement, child)
-        )
+          mergeWrapperIntoChild(normalizedElement, child)
+        ),
+        defaultHyperlinkColor
       )
     }
 
-    const normalizedChildren = normalizeValueList(normalizedElement.valueList)
-    if (!normalizedElement.value && !normalizedChildren.length) {
+    const normalizedChildren = normalizeValueList(
+      normalizedElement.valueList,
+      defaultHyperlinkColor
+    )
+    const trimmedChildren = trimParagraphBoundaryNewlines(normalizedChildren)
+    if (!normalizedElement.value && !trimmedChildren.length) {
       return []
     }
 
     return [
       {
         ...normalizedElement,
-        valueList: normalizedChildren
+        valueList: trimmedChildren
       }
     ]
   })
 }
 
 function normalizeElement(
-  element: IJspdfSourceState['result']['data']['main'][number]
+  element: IJspdfSourceState['result']['data']['main'][number],
+  defaultHyperlinkColor: string
 ) {
+  if (element.type === ElementType.HYPERLINK) {
+    return {
+      ...element,
+      color: element.color || defaultHyperlinkColor,
+      underline: element.underline ?? true
+    }
+  }
+
   if (element.type !== ElementType.LATEX) {
     return element
   }
@@ -134,13 +157,14 @@ function normalizeElement(
 
 function createZone(
   key: IZoneModel['key'],
-  elementList: IJspdfSourceState['result']['data']['main']
+  elementList: IJspdfSourceState['result']['data']['main'],
+  defaultHyperlinkColor: string
 ): IZoneModel {
-  const normalizedElementList = normalizeValueList(elementList)
-  const blockList: IDocumentBlockNode[] = normalizedElementList.map(element => ({
-    kind: getBlockKind(element),
-    element
-  }))
+  const normalizedElementList = normalizeValueList(
+    elementList,
+    defaultHyperlinkColor
+  )
+  const blockList = createBlockList(normalizedElementList)
 
   return {
     key,
@@ -148,6 +172,235 @@ function createZone(
     blockList,
     height: blockList.length * 24
   }
+}
+
+function isStandaloneBlockElement(element: IDocumentBlockNode['element']) {
+  return (
+    element.type === ElementType.TITLE ||
+    element.type === ElementType.LIST ||
+    element.type === ElementType.DATE ||
+    element.type === ElementType.TABLE ||
+    element.type === ElementType.IMAGE ||
+    element.type === ElementType.LATEX ||
+    element.type === ElementType.BLOCK ||
+    element.type === ElementType.LABEL ||
+    element.type === ElementType.SEPARATOR ||
+    element.type === ElementType.PAGE_BREAK
+  )
+}
+
+function createParagraphBlock(
+  inlineElementList: IJspdfSourceState['result']['data']['main']
+): IDocumentBlockNode | null {
+  const trimmedInlineElementList = trimParagraphBoundaryNewlines(inlineElementList)
+  if (!trimmedInlineElementList.length) {
+    return null
+  }
+
+  if (trimmedInlineElementList.length === 1) {
+    return {
+      kind: 'paragraph',
+      element: trimmedInlineElementList[0]
+    }
+  }
+
+  const paragraphProps = resolveParagraphProps(trimmedInlineElementList)
+
+  return {
+    kind: 'paragraph',
+    element: {
+      value: '',
+      valueList: trimmedInlineElementList,
+      ...paragraphProps
+    }
+  }
+}
+
+function resolveParagraphProps(
+  inlineElementList: IJspdfSourceState['result']['data']['main']
+) {
+  const [firstElement] = inlineElementList
+  if (!firstElement) {
+    return {}
+  }
+
+  const hasSameRowFlex = inlineElementList.every(
+    element => element.rowFlex === firstElement.rowFlex
+  )
+  const hasSameRowMargin = inlineElementList.every(
+    element => element.rowMargin === firstElement.rowMargin
+  )
+
+  return {
+    ...(hasSameRowFlex && firstElement.rowFlex
+      ? { rowFlex: firstElement.rowFlex }
+      : {}),
+    ...(hasSameRowMargin && typeof firstElement.rowMargin === 'number'
+      ? { rowMargin: firstElement.rowMargin }
+      : {})
+  }
+}
+
+function isTextParagraphElement(
+  element: IJspdfSourceState['result']['data']['main'][number]
+) {
+  return (
+    !element.type ||
+    element.type === ElementType.TEXT ||
+    element.type === ElementType.SUBSCRIPT ||
+    element.type === ElementType.SUPERSCRIPT
+  )
+}
+
+function trimLeadingNewlines(
+  elementList: IJspdfSourceState['result']['data']['main']
+) {
+  const trimmedElementList = [...elementList]
+
+  while (trimmedElementList.length) {
+    const firstElement = trimmedElementList[0]
+    if (!isTextParagraphElement(firstElement)) {
+      break
+    }
+    const nextValue = (firstElement.value || '').replace(/^\n+/, '')
+    if (nextValue === (firstElement.value || '')) {
+      break
+    }
+    if (!nextValue && !firstElement.valueList?.length) {
+      trimmedElementList.shift()
+      continue
+    }
+    trimmedElementList[0] = {
+      ...firstElement,
+      value: nextValue
+    }
+    break
+  }
+
+  return trimmedElementList
+}
+
+function trimTrailingNewlines(
+  elementList: IJspdfSourceState['result']['data']['main']
+) {
+  const trimmedElementList = [...elementList]
+
+  while (trimmedElementList.length) {
+    const lastIndex = trimmedElementList.length - 1
+    const lastElement = trimmedElementList[lastIndex]
+    if (!isTextParagraphElement(lastElement)) {
+      break
+    }
+    const nextValue = (lastElement.value || '').replace(/\n+$/, '')
+    if (nextValue === (lastElement.value || '')) {
+      break
+    }
+    if (!nextValue && !lastElement.valueList?.length) {
+      trimmedElementList.pop()
+      continue
+    }
+    trimmedElementList[lastIndex] = {
+      ...lastElement,
+      value: nextValue
+    }
+    break
+  }
+
+  return trimmedElementList
+}
+
+function trimParagraphBoundaryNewlines(
+  inlineElementList: IJspdfSourceState['result']['data']['main']
+) {
+  return trimTrailingNewlines(trimLeadingNewlines(inlineElementList))
+}
+
+function createBlockList(
+  normalizedElementList: IJspdfSourceState['result']['data']['main']
+) {
+  const blockList: IDocumentBlockNode[] = []
+  let inlineElementList: IJspdfSourceState['result']['data']['main'] = []
+
+  const flushInlineElementList = () => {
+    if (!inlineElementList.length) return
+    const paragraphBlock = createParagraphBlock(inlineElementList)
+    if (paragraphBlock) {
+      blockList.push(paragraphBlock)
+    }
+    inlineElementList = []
+  }
+
+  normalizedElementList.forEach(element => {
+    if (element.type === ElementType.LIST && element.valueList?.length) {
+      flushInlineElementList()
+      blockList.push(...createListItemBlocks(element))
+      return
+    }
+
+    if (isStandaloneBlockElement(element)) {
+      flushInlineElementList()
+      blockList.push({
+        kind: getBlockKind(element),
+        element
+      })
+      return
+    }
+
+    inlineElementList.push(element)
+  })
+
+  flushInlineElementList()
+
+  return blockList
+}
+
+function createSyntheticListId() {
+  syntheticListIdSeed += 1
+  return `__jspdf_list_${syntheticListIdSeed}`
+}
+
+function splitListItemValue(value: string) {
+  return value
+    .split('\n')
+    .map(item => item.replace(/\r/g, ''))
+    .filter(item => item.length > 0)
+}
+
+function createListItemBlocks(
+  listElement: IJspdfSourceState['result']['data']['main'][number]
+) {
+  const listId = listElement.listId || createSyntheticListId()
+  const blockList: IDocumentBlockNode[] = []
+
+  listElement.valueList?.forEach(listItem => {
+    const mergedListItem = mergeWrapperIntoChild(listElement, listItem)
+    const splitValueList =
+      !mergedListItem.valueList?.length && mergedListItem.value
+        ? splitListItemValue(mergedListItem.value)
+        : []
+
+    if (splitValueList.length) {
+      splitValueList.forEach(itemValue => {
+        blockList.push(...createBlockList([{
+          ...mergedListItem,
+          value: itemValue,
+          listId,
+          listType: listElement.listType,
+          listStyle: listElement.listStyle
+        }]))
+      })
+      return
+    }
+
+    blockList.push(...createBlockList([{
+      ...mergedListItem,
+      listId,
+      listType: listElement.listType,
+      listStyle: listElement.listStyle
+    }]))
+  })
+
+  return blockList
 }
 
 function createGraffitiList(source: IJspdfSourceState): IDocumentGraffitiPage[] {
@@ -165,6 +418,7 @@ function createGraffitiList(source: IJspdfSourceState): IDocumentGraffitiPage[] 
 }
 
 export function normalizeDocument(source: IJspdfSourceState): IDocumentModel {
+  syntheticListIdSeed = 0
   const data = source.result.data
   const badge = source.badge || {
     main: null,
@@ -198,6 +452,14 @@ export function normalizeDocument(source: IJspdfSourceState): IDocumentModel {
       defaultColor: source.options.defaultColor,
       defaultRowMargin: source.options.defaultRowMargin,
       defaultBasicRowMarginHeight: source.options.defaultBasicRowMarginHeight,
+      header: {
+        top: source.options.header.top,
+        disabled: source.options.header.disabled
+      },
+      footer: {
+        bottom: source.options.footer.bottom,
+        disabled: source.options.footer.disabled
+      },
       backgroundColor: source.options.background.color,
       backgroundImage: source.options.background.image,
       backgroundSize: source.options.background.size,
@@ -281,9 +543,21 @@ export function normalizeDocument(source: IJspdfSourceState): IDocumentModel {
         [TitleLevel.SIXTH]: source.options.title.defaultSixthSize
       }
     },
-    header: createZone('header', data.header || []),
-    main: createZone('main', data.main || []),
-    footer: createZone('footer', data.footer || []),
+    header: createZone(
+      'header',
+      data.header || [],
+      source.options.defaultHyperlinkColor
+    ),
+    main: createZone(
+      'main',
+      data.main || [],
+      source.options.defaultHyperlinkColor
+    ),
+    footer: createZone(
+      'footer',
+      data.footer || [],
+      source.options.defaultHyperlinkColor
+    ),
     graffiti: createGraffitiList(source)
   }
 }
