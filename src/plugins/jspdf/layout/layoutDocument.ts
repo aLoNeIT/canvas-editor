@@ -2,7 +2,7 @@ import { rasterizeElement } from '../fallback/rasterizeElement'
 import { resolveFallback } from '../fallback/resolveFallback'
 import type { IDocumentBlockNode, IDocumentModel } from '../model/document'
 import type { IPageModel } from '../model/layout'
-import { measureText } from '../measure/textMeasure'
+import { measureLineHeight, measureText } from '../measure/textMeasure'
 import { BlockType } from '../../../editor/dataset/enum/Block'
 import { ImageDisplay } from '../../../editor/dataset/enum/Common'
 import { ElementType } from '../../../editor/dataset/enum/Element'
@@ -95,8 +95,13 @@ interface IControlBorderSegment {
   right: number
 }
 
-function getTextLineHeight(size: number) {
-  return Math.max(24, size + 8)
+function getTextLineHeight(
+  font: string,
+  size: number,
+  bold?: boolean,
+  italic?: boolean
+) {
+  return measureLineHeight(font, size, bold, italic)
 }
 
 function isFloatingImageBlock(block: IDocumentBlockNode) {
@@ -304,7 +309,7 @@ function appendFrameDecorations(
     const width =
       page.width - documentModel.margins[1] - documentModel.margins[3] +
       (paddingLeft + paddingRight) * scale
-    const height = frame.footerTop - y + paddingBottom * scale
+    const height = frame.mainBottom - y + paddingBottom * scale
 
     createPageBorderLines({
       x,
@@ -1438,12 +1443,14 @@ function getResolvedTableRowHeightList(
     measureWidth: (value, style) =>
       measureText(
         value,
-        style?.font || 'Song',
+        style?.font || documentModel.defaults.defaultFont,
         style?.size || 12,
         style?.bold,
         style?.italic
       ).width,
-    lineHeight: getTextLineHeight(12),
+    lineHeight: getTextLineHeight(documentModel.defaults.defaultFont, 12),
+    font: documentModel.defaults.defaultFont,
+    size: 12,
     tabWidth: documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH
   })
 }
@@ -1836,15 +1843,15 @@ function appendTableRow(
       y,
       cellWidth,
       rowHeight: cellHeight,
-      font: 'Song',
+      font: documentModel.defaults.defaultFont,
       size: 12,
-      lineHeight: getTextLineHeight(12),
+      lineHeight: getTextLineHeight(documentModel.defaults.defaultFont, 12),
       tabWidth: documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH,
       color: '#000000',
       measureWidth: (value, style) =>
         measureText(
           value,
-          style?.font || 'Song',
+          style?.font || documentModel.defaults.defaultFont,
           style?.size || 12,
           style?.bold,
           style?.italic
@@ -1919,15 +1926,15 @@ function getTableRowBaseline(
       y,
       cellWidth,
       rowHeight: cellHeight,
-      font: 'Song',
+      font: documentModel.defaults.defaultFont,
       size: 12,
-      lineHeight: getTextLineHeight(12),
+      lineHeight: getTextLineHeight(documentModel.defaults.defaultFont, 12),
       tabWidth: documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH,
       color: '#000000',
       measureWidth: (value, style) =>
         measureText(
           value,
-          style?.font || 'Song',
+          style?.font || documentModel.defaults.defaultFont,
           style?.size || 12,
           style?.bold,
           style?.italic
@@ -2418,31 +2425,146 @@ async function appendStaticZone(
   appendControlBorders(page, controlBorderSegmentMap, documentModel, stage)
 }
 
+function measureStaticZoneHeight(
+  documentModel: IDocumentModel,
+  blockList: IDocumentBlockNode[],
+  width: number
+) {
+  const listSemanticMap = createZoneListSemanticMap(blockList, documentModel)
+  let totalHeight = 0
+
+  blockList.forEach(block => {
+    if (block.kind === 'paragraph' || block.kind === 'control') {
+      if (block.element.type === ElementType.LABEL) {
+        totalHeight += createLabelPlacement({
+          element: block.element,
+          x: 0,
+          y: 0,
+          fallbackFont: documentModel.defaults.defaultFont,
+          fallbackSize: documentModel.defaults.defaultSize,
+          fallbackColor: documentModel.defaults.labelDefaultColor,
+          fallbackBackgroundColor:
+            documentModel.defaults.labelDefaultBackgroundColor,
+          fallbackPadding: documentModel.defaults.labelDefaultPadding,
+          measureWidth: createMeasureWidth(
+            block.element.font || documentModel.defaults.defaultFont,
+            block.element.size || documentModel.defaults.defaultSize
+          )
+        }).height
+        return
+      }
+
+      if (block.element.type === ElementType.SEPARATOR) {
+        const rowMargin = resolveBlockTextStyle(
+          block.element,
+          documentModel.defaults
+        ).rowMargin
+        totalHeight += rowMargin * 2 + (block.element.lineWidth || 1)
+        return
+      }
+
+      if (block.element.type === ElementType.PAGE_BREAK) {
+        return
+      }
+
+      const resolved = createResolvedTextLayout(
+        block,
+        width,
+        documentModel,
+        listSemanticMap.get(block)
+      )
+      totalHeight += resolved.lineList.length
+        ? resolved.lineList.reduce(
+            (sum, line) => sum + line.height + resolved.textStyle.rowMargin * 2,
+            0
+          )
+        : resolved.height
+      return
+    }
+
+    if (block.kind === 'table') {
+      totalHeight += getResolvedTableRowHeightList(
+        block,
+        width,
+        documentModel
+      ).reduce((sum, rowHeight) => sum + rowHeight, 0)
+      return
+    }
+
+    if (block.kind === 'image') {
+      if (!isFloatingImageBlock(block)) {
+        totalHeight += getImageBlockHeight(block, documentModel)
+      }
+      return
+    }
+
+    totalHeight += getBlockLayoutHeight(block, width, documentModel)
+  })
+
+  return totalHeight
+}
+
+function resolveDocumentZoneHeights(documentModel: IDocumentModel) {
+  const contentWidth =
+    documentModel.width - documentModel.margins[1] - documentModel.margins[3]
+
+  return {
+    contentWidth,
+    documentModel: {
+      ...documentModel,
+      header: {
+        ...documentModel.header,
+        height: documentModel.defaults.header.disabled
+          ? 0
+          : measureStaticZoneHeight(
+              documentModel,
+              documentModel.header.blockList,
+              contentWidth
+            )
+      },
+      footer: {
+        ...documentModel.footer,
+        height: documentModel.defaults.footer.disabled
+          ? 0
+          : measureStaticZoneHeight(
+              documentModel,
+              documentModel.footer.blockList,
+              contentWidth
+            )
+      }
+    }
+  }
+}
+
 export async function layoutDocument(
   documentModel: IDocumentModel
 ): Promise<IPageModel[]> {
-  const frame = layoutFrame(documentModel)
-  const contentWidth =
-    documentModel.width - documentModel.margins[1] - documentModel.margins[3]
+  const resolved = resolveDocumentZoneHeights(documentModel)
+  const contentWidth = resolved.contentWidth
+  const resolvedDocumentModel = resolved.documentModel
+  const frame = layoutFrame(resolvedDocumentModel)
   const mainPageHeight = Math.max(1, frame.mainBottom - frame.mainTop)
   const placements = collectMainPlacements(
-    documentModel.main.blockList,
+    resolvedDocumentModel.main.blockList,
     contentWidth,
     mainPageHeight,
-    documentModel
+    resolvedDocumentModel
   )
   const placementIndexes = paginateMainPlacements(
     placements,
     frame,
-    documentModel,
+    resolvedDocumentModel,
     contentWidth
   )
 
-  const pageCount = getRequiredPageCount(documentModel, placementIndexes.length)
+  const pageCount = getRequiredPageCount(
+    resolvedDocumentModel,
+    placementIndexes.length
+  )
   const pageList: IPageModel[] = []
   const imageNumberMap = new Map<IDocumentBlockNode, number>()
   let imageNo = 1
-  documentModel.main.blockList.forEach(block => {
+  resolvedDocumentModel.main.blockList.forEach(block => {
     if (block.kind !== 'image') {
       return
     }
@@ -2451,40 +2573,44 @@ export async function layoutDocument(
     imageNo += 1
   })
   const backgroundImageSize =
-    documentModel.defaults.backgroundImage
-      ? await resolveImageSize(documentModel.defaults.backgroundImage)
+    resolvedDocumentModel.defaults.backgroundImage
+      ? await resolveImageSize(resolvedDocumentModel.defaults.backgroundImage)
       : null
   let continuityLineNo = 1
 
   for (let pageNo = 0; pageNo < pageCount; pageNo++) {
-    const page = createPage(pageNo, documentModel)
+    const page = createPage(pageNo, resolvedDocumentModel)
     appendFrameDecorations(
       page,
-      documentModel,
+      resolvedDocumentModel,
       pageCount,
       frame,
       backgroundImageSize
     )
-    await appendStaticZone(
-      page,
-      documentModel,
-      'header',
-      documentModel.header.blockList,
-      documentModel.margins[3],
-      frame.headerTop,
-      contentWidth,
-      imageNumberMap
-    )
-    await appendStaticZone(
-      page,
-      documentModel,
-      'footer',
-      documentModel.footer.blockList,
-      documentModel.margins[3],
-      frame.footerTop,
-      contentWidth,
-      imageNumberMap
-    )
+    if (!resolvedDocumentModel.defaults.header.disabled) {
+      await appendStaticZone(
+        page,
+        resolvedDocumentModel,
+        'header',
+        resolvedDocumentModel.header.blockList,
+        resolvedDocumentModel.margins[3],
+        frame.headerTop,
+        contentWidth,
+        imageNumberMap
+      )
+    }
+    if (!resolvedDocumentModel.defaults.footer.disabled) {
+      await appendStaticZone(
+        page,
+        resolvedDocumentModel,
+        'footer',
+        resolvedDocumentModel.footer.blockList,
+        resolvedDocumentModel.margins[3],
+        frame.footerTop,
+        contentWidth,
+        imageNumberMap
+      )
+    }
 
     let cursorY = frame.mainTop
     const lineNumberBaselineList: number[] = []
@@ -2498,10 +2624,10 @@ export async function layoutDocument(
       const placementResult = await appendPlacement(
         page,
         placement,
-        documentModel.margins[3],
+        resolvedDocumentModel.margins[3],
         cursorY,
         contentWidth,
-        documentModel,
+        resolvedDocumentModel,
         imageNumberMap
       )
       collectAreaDecorationSegment(
@@ -2521,7 +2647,7 @@ export async function layoutDocument(
         placementResult.renderX,
         placementResult.renderY,
         contentWidth,
-        documentModel
+        resolvedDocumentModel
       )
       if (typeof baselineY === 'number') {
         lineNumberBaselineList.push(baselineY)
@@ -2532,50 +2658,54 @@ export async function layoutDocument(
     appendAreaDecorations(
       page,
       areaSegmentMap,
-      documentModel.margins[3],
+      resolvedDocumentModel.margins[3],
       contentWidth
     )
-    appendControlBorders(page, controlBorderSegmentMap, documentModel)
+    appendControlBorders(page, controlBorderSegmentMap, resolvedDocumentModel)
+    if (!resolvedDocumentModel.defaults.header.disabled) {
+      appendFloatingImages(
+        page,
+        resolvedDocumentModel.header.blockList,
+        resolvedDocumentModel,
+        imageNumberMap,
+        'header'
+      )
+    }
     appendFloatingImages(
       page,
-      documentModel.header.blockList,
-      documentModel,
-      imageNumberMap,
-      'header'
-    )
-    appendFloatingImages(
-      page,
-      documentModel.main.blockList,
-      documentModel,
+      resolvedDocumentModel.main.blockList,
+      resolvedDocumentModel,
       imageNumberMap,
       'main'
     )
-    appendFloatingImages(
-      page,
-      documentModel.footer.blockList,
-      documentModel,
-      imageNumberMap,
-      'footer'
-    )
-    appendBadges(page, documentModel, areaSegmentMap, frame.mainTop)
-    appendGraffiti(page, documentModel)
+    if (!resolvedDocumentModel.defaults.footer.disabled) {
+      appendFloatingImages(
+        page,
+        resolvedDocumentModel.footer.blockList,
+        resolvedDocumentModel,
+        imageNumberMap,
+        'footer'
+      )
+    }
+    appendBadges(page, resolvedDocumentModel, areaSegmentMap, frame.mainTop)
+    appendGraffiti(page, resolvedDocumentModel)
 
     if (
-      !documentModel.defaults.lineNumber.disabled &&
+      !resolvedDocumentModel.defaults.lineNumber.disabled &&
       lineNumberBaselineList.length
     ) {
       createLineNumberPlacements({
         baselineYList: lineNumberBaselineList,
-        margins: documentModel.margins,
-        right: documentModel.defaults.lineNumber.right,
-        font: documentModel.defaults.lineNumber.font,
-        size: documentModel.defaults.lineNumber.size,
-        color: documentModel.defaults.lineNumber.color,
-        type: documentModel.defaults.lineNumber.type,
+        margins: resolvedDocumentModel.margins,
+        right: resolvedDocumentModel.defaults.lineNumber.right,
+        font: resolvedDocumentModel.defaults.lineNumber.font,
+        size: resolvedDocumentModel.defaults.lineNumber.size,
+        color: resolvedDocumentModel.defaults.lineNumber.color,
+        type: resolvedDocumentModel.defaults.lineNumber.type,
         startLineNo: continuityLineNo,
         measureWidth: createMeasureWidth(
-          documentModel.defaults.lineNumber.font,
-          documentModel.defaults.lineNumber.size
+          resolvedDocumentModel.defaults.lineNumber.font,
+          resolvedDocumentModel.defaults.lineNumber.size
         )
       }).forEach(placement => {
         page.textRuns.push({
@@ -2584,7 +2714,10 @@ export async function layoutDocument(
           ...placement
         })
       })
-      if (documentModel.defaults.lineNumber.type === LineNumberType.CONTINUITY) {
+      if (
+        resolvedDocumentModel.defaults.lineNumber.type ===
+        LineNumberType.CONTINUITY
+      ) {
         continuityLineNo += lineNumberBaselineList.length
       }
     }
@@ -2602,4 +2735,101 @@ export async function layoutDocument(
   }
 
   return pageList
+}
+
+export function collectLayoutDebugSummary(documentModel: IDocumentModel) {
+  const resolved = resolveDocumentZoneHeights(documentModel)
+  const contentWidth = resolved.contentWidth
+  const resolvedDocumentModel = resolved.documentModel
+  const frame = layoutFrame(resolvedDocumentModel)
+  const mainPageHeight = Math.max(1, frame.mainBottom - frame.mainTop)
+  const placements = collectMainPlacements(
+    resolvedDocumentModel.main.blockList,
+    contentWidth,
+    mainPageHeight,
+    resolvedDocumentModel
+  )
+  const placementIndexes = paginateMainPlacements(
+    placements,
+    frame,
+    resolvedDocumentModel,
+    contentWidth
+  )
+  const blockSummaryList = resolvedDocumentModel.main.blockList.map(
+    (block, index) => {
+      const blockPlacementList = placements.filter(
+        placement => placement.block === block
+      )
+      return {
+        index,
+        kind: block.kind,
+        type: block.element.type || 'text',
+        textPreview: (
+          block.element.value ||
+          (block.element.valueList || []).map(item => item.value || '').join('')
+        ).slice(0, 60),
+        placementCount: blockPlacementList.length,
+        consumedHeight: blockPlacementList.reduce(
+          (sum, placement) => sum + placement.height,
+          0
+        )
+      }
+    }
+  )
+
+  return {
+    placementCount: placements.length,
+    blockSummaryList,
+    pagePlacementSummary: placementIndexes.map((indexes, pageNo) => {
+      let cursorY = frame.mainTop
+      const blockIndexList = Array.from(new Set(indexes.map(index =>
+        resolvedDocumentModel.main.blockList.indexOf(placements[index].block)
+      ))).filter(index => index >= 0)
+      const placementSummaryList = indexes.map(index => {
+        const placement = placements[index]
+        const blockIndex =
+          resolvedDocumentModel.main.blockList.indexOf(placement.block)
+        const placementSummary = {
+          index,
+          kind: placement.kind,
+          blockIndex,
+          height: placement.height,
+          cursorYBefore: cursorY,
+          cursorYAfter: cursorY + placement.height
+        }
+        cursorY += placement.height
+        return placementSummary
+      })
+
+      return {
+        pageNo,
+        placementCount: indexes.length,
+        consumedHeight: placementSummaryList.reduce(
+          (sum, placement) => sum + placement.height,
+          0
+        ),
+        cursorYEnd: cursorY,
+        blockIndexList,
+        placementSummaryList,
+        blockList: blockIndexList.map(index => {
+          const block = resolvedDocumentModel.main.blockList[index]
+          return {
+            index,
+            kind: block.kind,
+            type: block.element.type || 'text',
+            textPreview: (
+              block.element.value ||
+              (block.element.valueList || []).map(item => item.value || '').join('')
+            ).slice(0, 60),
+            placementCount: placementSummaryList.filter(placement =>
+              placement.blockIndex === index
+            ).length,
+            consumedHeight: placementSummaryList
+              .filter(placement => placement.blockIndex === index)
+              .reduce((sum, placement) => sum + placement.height, 0)
+          }
+        })
+      }
+    })
+  }
 }

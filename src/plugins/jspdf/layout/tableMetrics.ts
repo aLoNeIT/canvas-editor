@@ -8,6 +8,10 @@ export interface IMeasureTableRowHeightOption {
   minHeight?: number
   baseCellWidth?: number
   columnWidthList?: number[]
+  font?: string
+  size?: number
+  bold?: boolean
+  italic?: boolean
   tabWidth?: number
   measureWidth: (
     text: string,
@@ -24,6 +28,10 @@ export interface IMeasureTableRowHeightOption {
 export interface IResolveTableRowHeightListOption {
   rowList: ITableRowFragment[]
   columnWidthList: number[]
+  font?: string
+  size?: number
+  bold?: boolean
+  italic?: boolean
   tabWidth?: number
   measureWidth: (
     text: string,
@@ -51,9 +59,17 @@ function getTableCellContentHeight(
   lineHeight: number,
   tabWidth?: number,
   baseCellWidth?: number,
-  columnWidthList?: number[]
+  columnWidthList?: number[],
+  font?: string,
+  size?: number,
+  bold?: boolean,
+  italic?: boolean
 ) {
   const runList = extractTableCellTextRuns(td, {
+    font,
+    size,
+    bold,
+    italic,
     lineHeight,
     tabWidth
   })
@@ -87,7 +103,11 @@ export function measureTableRowHeight(
         option.lineHeight,
         option.tabWidth,
         option.baseCellWidth,
-        option.columnWidthList
+        option.columnWidthList,
+        option.font,
+        option.size,
+        option.bold,
+        option.italic
       )
     )
   }, 0)
@@ -109,7 +129,11 @@ export function resolveTableRowHeightList(
         option.lineHeight,
         option.tabWidth,
         undefined,
-        option.columnWidthList
+        option.columnWidthList,
+        option.font,
+        option.size,
+        option.bold,
+        option.italic
       )
       if (!contentHeight) return
 

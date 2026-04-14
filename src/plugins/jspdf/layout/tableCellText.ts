@@ -3,6 +3,7 @@ import type { ITd } from '../../../editor/interface/table/Td'
 import { ControlType } from '../../../editor/dataset/enum/Control'
 import { ElementType } from '../../../editor/dataset/enum/Element'
 import type { IStyledTextRun } from './styledTextRunPlacement'
+import { measureLineHeight, measureText } from '../measure/textMeasure'
 
 export interface IResolvedTableCellTextStyle {
   text: string
@@ -142,6 +143,20 @@ function getControlTextElements(
   const control = element.control
   if (!control) return []
 
+  const checkableElementList = getCheckableControlTextElements(control, inherited)
+  const selectText = getSelectControlText(control)
+  const valueElementList = checkableElementList.length
+    ? checkableElementList
+    : control.value?.length
+      ? control.value
+      : selectText
+        ? [createSyntheticTextElement(selectText)]
+        : []
+
+  if (!valueElementList.length) {
+    return []
+  }
+
   const elementList: IElement[] = []
   const prefix = control.prefix || inherited?.controlPrefix
   const postfix = control.postfix || inherited?.controlPostfix
@@ -155,23 +170,7 @@ function getControlTextElements(
   if (control.preText) {
     elementList.push(createSyntheticTextElement(control.preText))
   }
-  const checkableElementList = getCheckableControlTextElements(control, inherited)
-  if (checkableElementList.length) {
-    elementList.push(...checkableElementList)
-  } else if (control.value?.length) {
-    elementList.push(...control.value)
-  } else {
-    const selectText = getSelectControlText(control)
-    if (selectText) {
-      elementList.push(createSyntheticTextElement(selectText))
-    } else if (control.placeholder) {
-      elementList.push(
-        createSyntheticTextElement(control.placeholder, {
-          color: inherited?.controlPlaceholderColor
-        })
-      )
-    }
-  }
+  elementList.push(...valueElementList)
   if (control.postText) {
     elementList.push(createSyntheticTextElement(control.postText))
   }
@@ -201,16 +200,22 @@ function getControlTextFallbackStyle(
   }
 
   const size = control.size || style.size
+  const font = control.font || style.font
+  const bold = control.bold ?? style.bold
+  const italic = control.italic ?? style.italic
 
   return {
     ...style,
-    font: control.font || style.font,
+    font,
     size,
-    bold: control.bold ?? style.bold,
-    italic: control.italic ?? style.italic,
+    bold,
+    italic,
     underline: control.underline ?? style.underline,
     strikeout: control.strikeout ?? style.strikeout,
-    lineHeight: Math.max(style.lineHeight, size + 8)
+    lineHeight: Math.max(
+      style.lineHeight,
+      measureLineHeight(font, size, bold, italic)
+    )
   }
 }
 
@@ -256,15 +261,26 @@ function createRunStyle(
       : element.type === ElementType.SUBSCRIPT
         ? size / 2
         : undefined
+  const metric = measureText(
+    element.value || getSyntheticElementText(element) || '\u4e2d',
+    element.font || inherited.font || 'Song',
+    size,
+    element.bold ?? inherited.bold,
+    element.italic ?? inherited.italic
+  )
   const style: ITableCellTextFallbackStyle & {
     font: string
     size: number
     color: string
     lineHeight: number
+    ascent: number
+    descent: number
   } = {
     font: element.font || inherited.font || 'Song',
     size,
     baselineShift,
+    ascent: metric.ascent,
+    descent: metric.descent,
     bold: element.bold ?? inherited.bold,
     italic: element.italic ?? inherited.italic,
     underline: element.underline ?? inherited.underline,
@@ -278,11 +294,21 @@ function createRunStyle(
     tabWidth: inherited.tabWidth,
     checkboxGap: inherited.checkboxGap,
     radioGap: inherited.radioGap,
-    lineHeight: Math.max(
-      baseSize + 8,
-      inherited.lineHeight || 0,
-      size + 8
-    )
+    lineHeight: Math.max(inherited.lineHeight || 0, (() => {
+      const intrinsicLineHeight = measureLineHeight(
+        element.font || inherited.font || 'Song',
+        size,
+        element.bold ?? inherited.bold,
+        element.italic ?? inherited.italic
+      )
+      if (
+        element.type === ElementType.SUPERSCRIPT ||
+        element.type === ElementType.SUBSCRIPT
+      ) {
+        return intrinsicLineHeight + size / 2
+      }
+      return intrinsicLineHeight
+    })())
   }
   return style
 }
@@ -300,6 +326,8 @@ export function extractElementTextRuns(
         widthOverride: style.tabWidth || 0,
         font: style.font,
         size: style.size,
+        ascent: style.ascent,
+        descent: style.descent,
         baselineShift: style.baselineShift,
         letterSpacing: style.letterSpacing,
         bold: style.bold,
@@ -317,6 +345,8 @@ export function extractElementTextRuns(
         text,
         font: style.font,
         size: style.size,
+        ascent: style.ascent,
+        descent: style.descent,
         baselineShift: style.baselineShift,
         letterSpacing: style.letterSpacing,
         bold: style.bold,
@@ -369,6 +399,14 @@ export function resolveTableCellTextStyle(
     underline: firstRun?.underline ?? fallback.underline,
     strikeout: firstRun?.strikeout ?? fallback.strikeout,
     color: firstRun?.color || fallback.color || '#000000',
-    lineHeight: Math.max(fallback.lineHeight || 0, size + 8)
+    lineHeight: Math.max(
+      fallback.lineHeight || 0,
+      measureLineHeight(
+        firstRun?.font || fallback.font || 'Song',
+        size,
+        firstRun?.bold ?? fallback.bold,
+        firstRun?.italic ?? fallback.italic
+      )
+    )
   }
 }

@@ -5,6 +5,8 @@ export interface IStyledTextRun {
   text: string
   font: string
   size: number
+  ascent?: number
+  descent?: number
   widthOverride?: number
   baselineShift?: number
   letterSpacing?: number
@@ -106,6 +108,12 @@ function createLine() {
   return line
 }
 
+function resolveRunBaseline(run: Pick<IStyledTextRun, 'ascent' | 'size' | 'baselineShift'>) {
+  const ascent = run.ascent ?? run.size
+  const baselineShift = run.baselineShift || 0
+  return ascent + Math.max(0, -baselineShift)
+}
+
 function shouldMergeSameStyle(rowFlex?: RowFlex) {
   return rowFlex !== RowFlex.ALIGNMENT && rowFlex !== RowFlex.JUSTIFY
 }
@@ -163,8 +171,8 @@ function flushLine(
       strikeout: fallbackRun.strikeout,
       color: fallbackRun.color
     })
-    currentLine.height = fallbackRun.lineHeight
-    currentLine.baseline = fallbackRun.size
+      currentLine.height = fallbackRun.lineHeight
+      currentLine.baseline = resolveRunBaseline(fallbackRun)
   }
 
   if (currentLine.segmentList.length) {
@@ -247,7 +255,10 @@ export function createStyledTextRunPlacements(
       )
       currentWidth += resolvedCharWidth
       currentLine.height = Math.max(currentLine.height, run.lineHeight)
-      currentLine.baseline = Math.max(currentLine.baseline, run.size)
+      currentLine.baseline = Math.max(
+        currentLine.baseline,
+        resolveRunBaseline(run)
+      )
     }
   })
 
@@ -302,7 +313,7 @@ export function createStyledTextRunPlacements(
 
   return {
     placementList,
-    contentHeight: lineList.reduce((sum, line) => sum + line.height, 0) + 8,
+    contentHeight: lineList.reduce((sum, line) => sum + line.height, 0),
     lineList: styledLineList
   }
 }
