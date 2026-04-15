@@ -9,7 +9,10 @@ import { collectDiagnostics } from './debug/collectDiagnostics'
 import { normalizeDocument } from './normalize/normalizeDocument'
 import { renderPdfBase64 } from './renderPdf'
 import { installBadgeStateTracking } from './source/badgeState'
-import { readEditorState } from './source/readEditorState'
+import {
+  readEditorPrintPageDataUrlList,
+  readEditorState
+} from './source/readEditorState'
 
 export interface IJspdfPluginOption {
   fonts?: Record<string, string>
@@ -20,6 +23,7 @@ export interface IJspdfPluginOption {
 export interface IJspdfExportOption extends IJspdfPluginOption {
   mode?: EditorMode
   paperDirection?: PaperDirection
+  __printPageDataUrlList?: string[]
 }
 
 export type CommandWithJspdf = Command & {
@@ -34,9 +38,15 @@ export function jspdfPlugin(editor: Editor, options: IJspdfPluginOption = {}) {
   installBadgeStateTracking(editor)
 
   command.executeExportPdfDiagnostics = async payload => {
+    const printPageDataUrlList = await readEditorPrintPageDataUrlList(
+      editor,
+      payload || {}
+    )
     const finalOption: IJspdfExportOption = {
       ...options,
-      ...payload
+      ...payload,
+      mode: payload?.mode || EditorMode.PRINT,
+      __printPageDataUrlList: printPageDataUrlList
     }
     const source = readEditorState(editor, finalOption)
     const documentModel = normalizeDocument(source)
@@ -45,11 +55,17 @@ export function jspdfPlugin(editor: Editor, options: IJspdfPluginOption = {}) {
   }
 
   command.executeExportPdfBase64 = async payload => {
+    const printPageDataUrlList = await readEditorPrintPageDataUrlList(
+      editor,
+      payload || {}
+    )
     const finalOption: IJspdfExportOption = {
       ...options,
-      ...payload
+      ...payload,
+      mode: payload?.mode || EditorMode.PRINT,
+      __printPageDataUrlList: printPageDataUrlList
     }
-    const mode = finalOption.mode || EditorMode.PRINT
+    const mode = finalOption.mode
     if (mode !== EditorMode.PRINT) {
       throw new Error('PDF export currently requires print mode layout')
     }

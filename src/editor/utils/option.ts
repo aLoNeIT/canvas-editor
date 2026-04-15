@@ -182,7 +182,7 @@ export function mergeOption(
     locale: 'zhCN',
     defaultType: 'TEXT',
     defaultColor: '#000000',
-    defaultFont: 'Microsoft YaHei',
+    defaultFont: 'SimSun',
     defaultSize: 16,
     minSize: 5,
     maxSize: 72,

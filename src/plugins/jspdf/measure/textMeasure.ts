@@ -6,6 +6,16 @@ export interface IMeasuredTextMetric {
 
 let measureCanvas: HTMLCanvasElement | null = null
 
+export function measureLineHeight(
+  font: string,
+  size: number,
+  bold?: boolean,
+  italic?: boolean
+) {
+  const metric = measureText('\u4e2d', font, size, bold, italic)
+  return Math.max(1, metric.ascent + metric.descent)
+}
+
 export function measureText(
   text: string,
   font: string,

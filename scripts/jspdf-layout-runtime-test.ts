@@ -11,7 +11,10 @@ import { ImageDisplay, NumberType } from '../src/editor/dataset/enum/Common.js'
 import { LineNumberType } from '../src/editor/dataset/enum/LineNumber.js'
 import { RowFlex } from '../src/editor/dataset/enum/Row.js'
 import { BlockType } from '../src/editor/dataset/enum/Block.js'
-import { ControlType } from '../src/editor/dataset/enum/Control.js'
+import {
+  ControlComponent,
+  ControlType
+} from '../src/editor/dataset/enum/Control.js'
 import {
   BackgroundRepeat,
   BackgroundSize
@@ -34,7 +37,10 @@ import {
 } from '../src/plugins/jspdf/layout/framePlacement.js'
 import { createLabelPlacement } from '../src/plugins/jspdf/layout/labelPlacement.js'
 import { createTableCellVisuals } from '../src/plugins/jspdf/layout/tableVisual.js'
-import { createSeparatorVectorLine } from '../src/plugins/jspdf/layout/separatorPlacement.js'
+import {
+  createSeparatorVectorLine,
+  resolveSeparatorVectorLineY
+} from '../src/plugins/jspdf/layout/separatorPlacement.js'
 import { paginateTableRows } from '../src/plugins/jspdf/layout/tablePagination.js'
 import {
   measureTableRowHeight,
@@ -67,6 +73,7 @@ import { TitleLevel } from '../src/editor/dataset/enum/Title.js'
 import { EditorMode } from '../src/editor/dataset/enum/Editor.js'
 import { assertNoFallback } from '../src/plugins/jspdf/debug/assertNoFallback.js'
 import { collectDiagnostics } from '../src/plugins/jspdf/debug/collectDiagnostics.js'
+import { readEditorState } from '../src/plugins/jspdf/source/readEditorState.js'
 
 function createMeasureWidth(unitWidth = 10) {
   return (text: string) => text.length * unitWidth
@@ -204,6 +211,12 @@ function createJspdfPluginCommandHarness(
   require.cache[readEditorStateModulePath] = createCachedModule(
     readEditorStateModulePath,
     {
+      async readEditorPrintPageDataUrlList() {
+        callList.push({
+          kind: 'readEditorPrintPageDataUrlList'
+        })
+        return []
+      },
       readEditorState(editor: unknown, finalOption: unknown) {
         callList.push({
           kind: 'readEditorState',
@@ -424,6 +437,125 @@ function createRuntimeSourceOptions() {
   }
 }
 
+function testReadEditorStateFiltersAssistElementsInPrintMode() {
+  const sourceOptions = createRuntimeSourceOptions()
+  const result = readEditorState(
+    {
+      command: {
+        getValue() {
+          return {
+            version: 'test',
+            data: {
+              header: [],
+              main: [
+                {
+                  value: '{',
+                  controlId: 'control-min-width',
+                  controlComponent: ControlComponent.PREFIX,
+                  control: {
+                    minWidth: 120
+                  }
+                },
+                {
+                  value: 'A',
+                  controlId: 'control-min-width',
+                  controlComponent: ControlComponent.VALUE
+                },
+                {
+                  value: '}',
+                  controlId: 'control-min-width',
+                  controlComponent: ControlComponent.POSTFIX,
+                  control: {
+                    minWidth: 120
+                  }
+                },
+                {
+                  value: 'pre',
+                  controlId: 'control-pre-post',
+                  controlComponent: ControlComponent.PRE_TEXT,
+                  control: {
+                    preText: 'pre'
+                  }
+                },
+                {
+                  value: 'B',
+                  controlId: 'control-pre-post',
+                  controlComponent: ControlComponent.VALUE
+                },
+                {
+                  value: 'post',
+                  controlId: 'control-pre-post',
+                  controlComponent: ControlComponent.POST_TEXT,
+                  control: {
+                    postText: 'post'
+                  }
+                },
+                {
+                  value: 'placeholder',
+                  controlId: 'control-placeholder',
+                  controlComponent: ControlComponent.PLACEHOLDER,
+                  control: {
+                    placeholder: 'placeholder'
+                  }
+                }
+              ],
+              footer: [],
+              graffiti: []
+            },
+            options: sourceOptions
+          }
+        },
+        getOptions() {
+          return sourceOptions
+        }
+      }
+    } as any,
+    {
+      mode: EditorMode.PRINT
+    }
+  )
+
+  assert.deepEqual(
+    result.result.data.main.map(element => ({
+      controlId: element.controlId,
+      controlComponent: element.controlComponent,
+      value: element.value
+    })),
+    [
+      {
+        controlId: 'control-min-width',
+        controlComponent: ControlComponent.PREFIX,
+        value: ''
+      },
+      {
+        controlId: 'control-min-width',
+        controlComponent: ControlComponent.VALUE,
+        value: 'A'
+      },
+      {
+        controlId: 'control-min-width',
+        controlComponent: ControlComponent.POSTFIX,
+        value: ''
+      },
+      {
+        controlId: 'control-pre-post',
+        controlComponent: ControlComponent.PRE_TEXT,
+        value: 'pre'
+      },
+      {
+        controlId: 'control-pre-post',
+        controlComponent: ControlComponent.VALUE,
+        value: 'B'
+      },
+      {
+        controlId: 'control-pre-post',
+        controlComponent: ControlComponent.POST_TEXT,
+        value: 'post'
+      }
+    ]
+  )
+}
+
 function testExpandsTableRowHeightForWrappedCellText() {
   const height = measureTableRowHeight({
     tdList: [createTd('abcdef')],
@@ -581,6 +713,49 @@ function testNormalizeDocumentSkipsHiddenElements() {
       }
     ]
   )
+}
+
+function testNormalizeDocumentTrimsStandaloneWrapperBoundaryNewlines() {
+  const documentModel = normalizeDocument({
+    result: {
+      data: {
+        header: [],
+        main: [
+          {
+            type: ElementType.LIST,
+            listType: ListType.OL,
+            listId: 'list-1',
+            value: '',
+            valueList: [
+              {
+                value: '\nfoo\nbar\n'
+              }
+            ]
+          }
+        ],
+        footer: [],
+        graffiti: []
+      }
+    },
+    options: createRuntimeSourceOptions()
+  } as any)
+
+  assert.deepEqual(documentModel.main.blockList, [
+    {
+      kind: 'paragraph',
+      element: {
+        type: ElementType.LIST,
+        listType: ListType.OL,
+        listId: 'list-1',
+        value: '',
+        valueList: [
+          {
+            value: 'foo\nbar'
+          }
+        ]
+      }
+    }
+  ])
 }
 
 function testNormalizeDocumentResolvesLatexSvgMetrics() {
@@ -1266,6 +1441,24 @@ function testCreatesSeparatorVectorLine() {
     width: 2,
     dash: [4, 2]
   })
+}
+
+function testCreatesSeparatorVectorLineFromRoundedBaseY() {
+  const line = createSeparatorVectorLine({
+    element: {
+      value: '',
+      width: 80,
+      lineWidth: 2,
+      color: '#ff0000'
+    },
+    x: 10,
+    y: 999,
+    baseY: 20.4
+  })
+
+  assert.equal(resolveSeparatorVectorLineY(20.4, 2), 21)
+  assert.equal(line.y1, 21)
+  assert.equal(line.y2, 21)
 }
 
 function testCreatesLabelPlacement() {
@@ -9840,6 +10033,90 @@ async function testLayoutDocumentAssignsStaticZoneBlockStages() {
   }
 }
 
+async function testLayoutDocumentDoesNotAddBlankHeaderLineForLeadingNewline() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [
+              {
+                type: ElementType.TITLE,
+                value: 'Hospital',
+                size: 32,
+                rowFlex: RowFlex.CENTER
+              },
+              {
+                value: '\nSubtitle',
+                size: 18,
+                rowFlex: RowFlex.CENTER
+              },
+              {
+                type: ElementType.SEPARATOR,
+                value: '\n'
+              }
+            ],
+            main: [
+              {
+                value: 'Body'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    const page = pageList[0]
+    const hospitalRun = page.textRuns.find(
+      run => run.text === 'Hospital' && run.stage === 40
+    ) as any
+    const subtitleRun = page.textRuns.find(
+      run => run.text === 'Subtitle' && run.stage === 40
+    ) as any
+    const headerSeparator = page.vectorLines.find(
+      line => line.stage === 40
+    ) as any
+
+    assert.ok(hospitalRun)
+    assert.ok(subtitleRun)
+    assert.ok(headerSeparator)
+    assert.equal(subtitleRun.y, 98)
+    assert.equal(headerSeparator.y1, 82.5)
+    assert.equal(roundTo3(headerSeparator.y1 - subtitleRun.y), -15.5)
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentAssignsStaticZoneControlBorderStage() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -11907,9 +12184,14 @@ async function testJspdfPluginReturnsDiagnosticsFromPageModels() {
     })
     assert.deepEqual(
       harness.callList.map(item => item.kind),
-      ['readEditorState', 'normalizeDocument', 'layoutDocument']
+      [
+        'readEditorPrintPageDataUrlList',
+        'readEditorState',
+        'normalizeDocument',
+        'layoutDocument'
+      ]
     )
-    assert.deepEqual(harness.callList[0].payload, {
+    assert.deepEqual(harness.callList[1].payload, {
       editor: harness.editor,
       finalOption: {
         defaultFontFamily: 'PluginSong',
@@ -11954,7 +12236,12 @@ async function testJspdfPluginRejectsMissingPageModels() {
     )
     assert.deepEqual(
       harness.callList.map(item => item.kind),
-      ['readEditorState', 'normalizeDocument', 'layoutDocument']
+      [
+        'readEditorPrintPageDataUrlList',
+        'readEditorState',
+        'normalizeDocument',
+        'layoutDocument'
+      ]
     )
   } finally {
     harness.restore()
@@ -11991,7 +12278,12 @@ async function testJspdfPluginDebugRejectsFallbackBlocks() {
     )
     assert.deepEqual(
       harness.callList.map(item => item.kind),
-      ['readEditorState', 'normalizeDocument', 'layoutDocument']
+      [
+        'readEditorPrintPageDataUrlList',
+        'readEditorState',
+        'normalizeDocument',
+        'layoutDocument'
+      ]
     )
   } finally {
     harness.restore()
@@ -12018,7 +12310,12 @@ async function testJspdfPluginDebugRejectsLayoutWarnings() {
     )
     assert.deepEqual(
       harness.callList.map(item => item.kind),
-      ['readEditorState', 'normalizeDocument', 'layoutDocument']
+      [
+        'readEditorPrintPageDataUrlList',
+        'readEditorState',
+        'normalizeDocument',
+        'layoutDocument'
+      ]
     )
   } finally {
     harness.restore()
@@ -12049,7 +12346,12 @@ async function testJspdfPluginDebugRejectsEmptyRenderedPage() {
     )
     assert.deepEqual(
       harness.callList.map(item => item.kind),
-      ['readEditorState', 'normalizeDocument', 'layoutDocument']
+      [
+        'readEditorPrintPageDataUrlList',
+        'readEditorState',
+        'normalizeDocument',
+        'layoutDocument'
+      ]
     )
   } finally {
     harness.restore()
@@ -12082,6 +12384,7 @@ async function testJspdfPluginRenderPdfPassesThroughInNormalMode() {
     assert.deepEqual(
       harness.callList.map(item => item.kind),
       [
+        'readEditorPrintPageDataUrlList',
         'readEditorState',
         'normalizeDocument',
         'layoutDocument',
@@ -12101,6 +12404,7 @@ async function testJspdfPluginRenderPdfPassesThroughInNormalMode() {
 }
 
 async function run() {
+  testReadEditorStateFiltersAssistElementsInPrintMode()
   await testBootstrapPdfFontsRegistersAllTextStyles()
   testWrapsLongTextByWidth()
   testPreservesExplicitLineBreaks()
@@ -12109,6 +12413,7 @@ async function run() {
   testMeasuresRowHeightByResolvedCellTextSize()
   testDistributesRowspanExtraHeightToSpanTailRow()
   testNormalizeDocumentSkipsHiddenElements()
+  testNormalizeDocumentTrimsStandaloneWrapperBoundaryNewlines()
   testNormalizeDocumentResolvesLatexSvgMetrics()
   testTracksBadgeStateViaWrappedCommands()
   testNormalizeDocumentCopiesBadgeState()
@@ -12124,6 +12429,7 @@ async function run() {
   testShrinksAndRaisesSuperscriptRuns()
   testShrinksAndLowersSubscriptRuns()
   testCreatesSeparatorVectorLine()
+  testCreatesSeparatorVectorLineFromRoundedBaseY()
   testCreatesLabelPlacement()
   testCreatesBackgroundRect()
   testCreatesBackgroundImagePlacementForMatchingPage()
@@ -12191,6 +12497,7 @@ async function run() {
   await testLayoutDocumentAppendsFrameDecorationsToPageModel()
   await testLayoutDocumentAssignsLabelAndSeparatorStages()
   await testLayoutDocumentAssignsStaticZoneBlockStages()
+  await testLayoutDocumentDoesNotAddBlankHeaderLineForLeadingNewline()
   await testLayoutDocumentAssignsStaticZoneControlBorderStage()
   await testLayoutDocumentRendersStaticZoneLatex()
   testCreatesCenteredPageNumberPlacement()

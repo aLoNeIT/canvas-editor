@@ -27,11 +27,49 @@ import { formatPrismToken } from './utils/prism'
 import { Signature } from './components/signature/Signature'
 import simsunTtfUrl from './assets/fonts/simsun.ttf'
 import { jspdfPlugin, type CommandWithJspdf } from './plugins/jspdf'
+import { bootstrapPdfFonts } from './plugins/jspdf/font'
+import { measureText } from './plugins/jspdf/measure/textMeasure'
+import { readEditorState } from './plugins/jspdf/source/readEditorState'
+import { normalizeDocument } from './plugins/jspdf/normalize/normalizeDocument'
+import {
+  collectLayoutDebugSummary,
+  layoutDocument
+} from './plugins/jspdf/layout/layoutDocument'
+import { layoutFrame } from './plugins/jspdf/layout/layoutFrame'
+import { resolvePdfFontFamily } from './plugins/jspdf/render/fontFamily'
+import { resolvePdfTextFontStyle } from './plugins/jspdf/render/fontStyle'
+import { renderPdfBase64 } from './plugins/jspdf/renderPdf'
 import { debounce, nextTick, scrollIntoView } from './utils'
+import jsPDF from 'jspdf'
+import { Draw } from './editor/core/draw/Draw'
+import { Listener } from './editor/core/listener/Listener'
+import { EventBus } from './editor/core/event/eventbus/EventBus'
+import { Override } from './editor/core/override/Override'
 
-window.onload = function () {
+async function registerBrowserFont(fontFamily: string, url: string) {
+  if (
+    typeof FontFace === 'undefined' ||
+    typeof document === 'undefined' ||
+    !('fonts' in document)
+  ) {
+    return
+  }
+
+  const fontSet = document.fonts as any
+  if (typeof fontSet.check === 'function' && fontSet.check(`16px "${fontFamily}"`)) {
+    return
+  }
+
+  const fontFace = new FontFace(fontFamily, `url(${url})`)
+  await fontFace.load()
+  fontSet.add(fontFace)
+  await fontSet.load(`16px "${fontFamily}"`)
+}
+
+window.onload = async function () {
   const isApple =
     typeof navigator !== 'undefined' && /Mac OS X/.test(navigator.userAgent)
+  await registerBrowserFont('SimSun', simsunTtfUrl)
 
   // 1. 初始化编辑器
   const container = document.querySelector<HTMLDivElement>('.editor')!
@@ -62,12 +100,25 @@ window.onload = function () {
         }
       ]
     },
-    options
+    {
+      ...options,
+      defaultFont: 'SimSun',
+      watermark: {
+        ...options.watermark,
+        data: options.watermark?.data || '',
+        font: 'SimSun'
+      },
+      pageNumber: {
+        ...options.pageNumber,
+        font: 'SimSun'
+      }
+    }
   )
   instance.use(jspdfPlugin, {
     fonts: {
       SimSun: simsunTtfUrl
-    }
+    },
+    defaultFontFamily: 'SimSun'
   })
   console.log('实例: ', instance)
   // cypress使用
@@ -97,12 +148,302 @@ window.onload = function () {
     link.remove()
     URL.revokeObjectURL(url)
   }
+  const captureEditorPages = async () => {
+    const snapshot = instance.command.getValue()
+    const shadowRoot = document.createElement('div')
+    shadowRoot.style.position = 'fixed'
+    shadowRoot.style.left = '-99999px'
+    shadowRoot.style.top = '0'
+    shadowRoot.style.pointerEvents = 'none'
+    shadowRoot.style.opacity = '0'
+    document.body.append(shadowRoot)
+
+    const tempEditor = new Editor(shadowRoot, snapshot.data, {
+      ...snapshot.options,
+      mode: EditorMode.PRINT
+    })
+
+    try {
+      const dataUrlList = await tempEditor.command.getImage({
+        mode: EditorMode.PRINT
+      })
+      return await Promise.all(
+        dataUrlList.map(
+          (dataUrl, index) =>
+            new Promise<{
+              index: number
+              width: number
+              height: number
+              dataUrl: string
+            }>(resolve => {
+              const image = new Image()
+              image.onload = () => {
+                resolve({
+                  index,
+                  width: image.width,
+                  height: image.height,
+                  dataUrl
+                })
+              }
+              image.src = dataUrl
+            })
+        )
+      )
+    } finally {
+      tempEditor.destroy()
+      shadowRoot.remove()
+    }
+  }
+  const debugPdfLayout = async () => {
+    const source = readEditorState(instance, {
+      mode: EditorMode.PRINT
+    })
+    const documentModel = normalizeDocument(source)
+    const pageModels = await layoutDocument(documentModel)
+    const frame = layoutFrame(documentModel)
+
+    return {
+      sourceSummary: {
+        headerCount: source.result.data.header?.length || 0,
+        mainCount: source.result.data.main.length,
+        footerCount: source.result.data.footer?.length || 0
+      },
+      documentSummary: {
+        width: documentModel.width,
+        height: documentModel.height,
+        margins: documentModel.margins,
+        headerHeight: documentModel.header.height,
+        footerHeight: documentModel.footer.height,
+        headerDefaults: documentModel.defaults.header,
+        footerDefaults: documentModel.defaults.footer,
+        frame,
+        mainBlockCount: documentModel.main.blockList.length,
+        mainBlockPreview: documentModel.main.blockList.slice(0, 30).map(block => ({
+          kind: block.kind,
+          type: block.element.type || 'text',
+          value: (block.element.value || '').slice(0, 40),
+          valueListText: (block.element.valueList || [])
+            .map(item => item.value || '')
+            .join('')
+            .slice(0, 40)
+        }))
+      },
+      layoutSummary: collectLayoutDebugSummary(documentModel),
+      pageSummary: pageModels.map(page => ({
+        pageNo: page.pageNo,
+        textRunCount: page.textRuns.length,
+        vectorLineCount: page.vectorLines.length,
+        highlightCount: page.highlightRects.length,
+        rasterCount: page.rasterBlocks.length,
+        issues: page.issues,
+        textRunPreview: page.textRuns.slice(0, 20).map(run => ({
+          text: run.text,
+          x: run.x,
+          y: run.y,
+          width: run.width,
+          height: run.height,
+          font: run.font,
+          size: run.size,
+          stage: run.stage
+        }))
+      }))
+    }
+  }
+  const debugPdfPageModels = async () => {
+    const source = readEditorState(instance, {
+      mode: EditorMode.PRINT
+    })
+    const documentModel = normalizeDocument(source)
+    const pageModels = await layoutDocument(documentModel)
+
+    return {
+      pageModels,
+      fontUrls: {
+        SimSun: simsunTtfUrl
+      },
+      defaultFontFamily: 'SimSun',
+      paperDirection: source.options.paperDirection
+    }
+  }
+  const renderPdfFromPageModels = async (pageModels: any[], payload?: {
+    fontUrls?: Record<string, string>
+    defaultFontFamily?: string
+    paperDirection?: PaperDirection
+  }) => {
+    return renderPdfBase64(pageModels, {
+      fonts: payload?.fontUrls || {
+        SimSun: simsunTtfUrl
+      },
+      defaultFontFamily: payload?.defaultFontFamily || 'SimSun',
+      paperDirection: payload?.paperDirection
+    })
+  }
+  const debugPdfTextMetrics = async (
+    sampleList: Array<{
+      label: string
+      text: string
+      size: number
+      font: string
+      bold?: boolean
+      italic?: boolean
+    }>
+  ) => {
+    const doc = new jsPDF({
+      unit: 'pt',
+      format: 'a4'
+    })
+    await bootstrapPdfFonts(doc, {
+      fonts: {
+        SimSun: simsunTtfUrl
+      },
+      defaultFontFamily: 'SimSun'
+    })
+
+    return sampleList.map(sample => {
+      const browserMetric = measureText(
+        sample.text,
+        sample.font,
+        sample.size,
+        sample.bold,
+        sample.italic
+      )
+      doc.setFont(
+        resolvePdfFontFamily(doc, sample.font, 'SimSun'),
+        resolvePdfTextFontStyle(sample)
+      )
+      doc.setFontSize(sample.size)
+      const pdfWidth = doc.getTextWidth(sample.text)
+      const horizontalScale =
+        !pdfWidth || !browserMetric.width
+          ? 100
+          : (browserMetric.width / pdfWidth) * 100
+      const effectivePdfWidth = pdfWidth * (horizontalScale / 100)
+      const relativeDiff =
+        browserMetric.width === 0
+          ? 0
+          : Math.abs(browserMetric.width - effectivePdfWidth) /
+            browserMetric.width
+
+      return {
+        ...sample,
+        browserWidth: browserMetric.width,
+        pdfWidth,
+        effectivePdfWidth,
+        horizontalScale,
+        relativeDiff
+      }
+    })
+  }
+  const debugCorePrintRows = async () => {
+    const snapshot = instance.command.getValue()
+    const shadowRoot = document.createElement('div')
+    shadowRoot.style.position = 'fixed'
+    shadowRoot.style.left = '-99999px'
+    shadowRoot.style.top = '0'
+    shadowRoot.style.pointerEvents = 'none'
+    shadowRoot.style.opacity = '0'
+    document.body.append(shadowRoot)
+
+    const draw = new Draw(
+      shadowRoot,
+      snapshot.options as any,
+      {
+        header: snapshot.data.header || [],
+        main: snapshot.data.main,
+        footer: snapshot.data.footer || [],
+        graffiti: snapshot.data.graffiti || []
+      },
+      new Listener(),
+      new EventBus<any>(),
+      new Override()
+    )
+
+    try {
+      return draw.getPageRowList().map((rowList, pageNo) => ({
+        pageNo,
+        rowList: rowList.map(row => ({
+          rowIndex: row.rowIndex,
+          height: row.height,
+          width: row.width,
+          isList: row.isList,
+          isSurround: row.isSurround,
+          text: row.elementList
+            .map(element => element.value || '')
+            .join('')
+        }))
+      }))
+    } finally {
+      draw.destroy()
+      shadowRoot.remove()
+    }
+  }
+  const debugCoreHeaderLayout = async () => {
+    const snapshot = instance.command.getValue()
+    const shadowRoot = document.createElement('div')
+    shadowRoot.style.position = 'fixed'
+    shadowRoot.style.left = '-99999px'
+    shadowRoot.style.top = '0'
+    shadowRoot.style.pointerEvents = 'none'
+    shadowRoot.style.opacity = '0'
+    document.body.append(shadowRoot)
+
+    const draw = new Draw(
+      shadowRoot,
+      snapshot.options as any,
+      {
+        header: snapshot.data.header || [],
+        main: snapshot.data.main,
+        footer: snapshot.data.footer || [],
+        graffiti: snapshot.data.graffiti || []
+      },
+      new Listener(),
+      new EventBus<any>(),
+      new Override()
+    )
+
+    try {
+      draw.getZone().setZone(EditorZone.HEADER)
+      return {
+        rowList: draw.getHeader().getRowList().map(row => ({
+          rowIndex: row.rowIndex,
+          height: row.height,
+          ascent: row.ascent,
+          text: row.elementList.map(element => element.value || '').join('')
+        })),
+        positionList: draw.getHeader().getPositionList().map(position => ({
+          value: position.value,
+          rowIndex: position.rowIndex,
+          leftTop: position.coordinate.leftTop,
+          leftBottom: position.coordinate.leftBottom,
+          rightTop: position.coordinate.rightTop,
+          rightBottom: position.coordinate.rightBottom,
+          lineHeight: position.lineHeight
+        }))
+      }
+    } finally {
+      draw.destroy()
+      shadowRoot.remove()
+    }
+  }
   if (import.meta.env.DEV) {
+    Reflect.set(window, '__editorInstance', instance)
     Reflect.set(window, '__exportPdfBase64', exportPdfBase64)
     Reflect.set(window, '__exportPdfDiagnostics', () =>
       (instance.command as CommandWithJspdf).executeExportPdfDiagnostics()
     )
     Reflect.set(window, '__exportPdf', exportPdf)
+    Reflect.set(window, '__captureEditorPages', captureEditorPages)
+    Reflect.set(window, '__debugPdfLayout', debugPdfLayout)
+    Reflect.set(window, '__debugPdfPageModels', debugPdfPageModels)
+    Reflect.set(window, '__renderPdfFromPageModels', renderPdfFromPageModels)
+    Reflect.set(window, '__debugPdfTextMetrics', debugPdfTextMetrics)
+    Reflect.set(window, '__debugCorePrintRows', debugCorePrintRows)
+    Reflect.set(window, '__debugCoreHeaderLayout', debugCoreHeaderLayout)
+    Reflect.set(window, '__jspdfDebug', {
+      fontUrls: {
+        SimSun: simsunTtfUrl
+      }
+    })
   }
 
   // 菜单弹窗销毁

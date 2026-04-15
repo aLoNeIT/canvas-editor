@@ -5,6 +5,7 @@ import type {
   IDocumentLayoutDefaults
 } from '../model/document'
 import type { ITextPlacement } from './textPlacement'
+import { measureLineHeight } from '../measure/textMeasure'
 
 const ORDERED_LIST_GAP = 10
 const UNORDERED_LIST_INDENT = 20
@@ -177,7 +178,12 @@ export function resolveBlockTextStyle(
     bold: element.bold ?? Boolean(element.level),
     italic: element.italic,
     color: element.color || defaults.defaultColor,
-    lineHeight: Math.max(24, size + 8),
+    lineHeight: measureLineHeight(
+      element.font || defaults.defaultFont,
+      size,
+      element.bold ?? Boolean(element.level),
+      element.italic
+    ),
     rowMargin:
       defaults.defaultBasicRowMarginHeight *
       getRowMarginRatio(size) *

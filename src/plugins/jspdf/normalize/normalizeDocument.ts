@@ -430,6 +430,7 @@ export function normalizeDocument(source: IJspdfSourceState): IDocumentModel {
     height: source.options.height,
     margins: [...source.options.margins],
     scale: source.options.scale,
+    printPageDataUrlList: source.exportOptions.__printPageDataUrlList,
     badge: {
       top: source.options.badge.top,
       left: source.options.badge.left,

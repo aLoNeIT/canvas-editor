@@ -10,7 +10,7 @@ export const defaultWatermarkOption: Readonly<Required<IWatermark>> = {
   color: '#AEB5C0',
   opacity: 0.3,
   size: 200,
-  font: 'Microsoft YaHei',
+  font: 'SimSun',
   repeat: false,
   gap: [10, 10],
   numberType: NumberType.ARABIC

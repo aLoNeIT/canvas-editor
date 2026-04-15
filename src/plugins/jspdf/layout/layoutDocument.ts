@@ -7,6 +7,7 @@ import { BlockType } from '../../../editor/dataset/enum/Block'
 import { ImageDisplay } from '../../../editor/dataset/enum/Common'
 import { ElementType } from '../../../editor/dataset/enum/Element'
 import { LineNumberType } from '../../../editor/dataset/enum/LineNumber'
+import { WatermarkType } from '../../../editor/dataset/enum/Watermark'
 import { splitText } from '../../../editor/utils'
 import {
   createListMarkerPlacement,
@@ -23,8 +24,7 @@ import {
   createLineNumberPlacements,
   createPageBorderLines,
   createPageNumberPlacement,
-  createWatermarkPlacement,
-  createWatermarkPlacements
+  createWatermarkPlacement
 } from './framePlacement'
 import { getBlockHeight } from './layoutBlock'
 import { layoutFrame, type IFrameLayoutResult } from './layoutFrame'
@@ -43,6 +43,17 @@ import type { IStyledTextPlacementLine } from './styledTextRunPlacement'
 import { createLatexRasterBlock } from './latex'
 
 const DEFAULT_TAB_WIDTH = 32
+const DENSE_CJK_FALLBACK_SOURCE_TYPE = 'text-line-cjk'
+const DENSE_CJK_MIN_LENGTH = 20
+const DENSE_CJK_MIN_RATIO = 0.6
+const DENSE_CJK_FALLBACK_PIXEL_RATIO = 3
+const CJK_CHAR_REG = /[\u3400-\u9fff\uf900-\ufaff]/
+const ASCII_ALPHA_REG = /[A-Za-z]/
+const DIGIT_REG = /[0-9]/
+const SHORT_CJK_LINE_MAX_LENGTH = 24
+const SHORT_CJK_LINE_MAX_SIZE = 18
+const COMPACT_MIXED_LINE_MAX_LENGTH = 48
+const rasterSourceImageCache = new Map<string, Promise<HTMLImageElement>>()
 
 interface ITableRowPlacement {
   kind: 'table-row'
@@ -141,7 +152,233 @@ function createPage(pageNo: number, documentModel: IDocumentModel): IPageModel {
   }
 }
 
-function appendFrameDecorations(
+function loadRasterSourceImage(dataUrl: string) {
+  const cached = rasterSourceImageCache.get(dataUrl)
+  if (cached) {
+    return cached
+  }
+
+  const imagePromise = new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () =>
+      reject(new Error('Failed to load raster source image'))
+    image.src = dataUrl
+  })
+  rasterSourceImageCache.set(dataUrl, imagePromise)
+  return imagePromise
+}
+
+async function cropPageRegionDataUrl(
+  dataUrl: string,
+  crop: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }
+) {
+  const image = await loadRasterSourceImage(dataUrl)
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.ceil(crop.width))
+  canvas.height = Math.max(1, Math.ceil(crop.height))
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    throw new Error('Fallback crop canvas context is unavailable')
+  }
+
+  ctx.drawImage(
+    image,
+    crop.x,
+    crop.y,
+    crop.width,
+    crop.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  )
+
+  return canvas.toDataURL('image/png')
+}
+
+function resolvePlacementRasterBounds(
+  placementList: IStyledTextPlacementLine['placementList'],
+  x: number,
+  y: number
+) {
+  const absolutePlacementList = placementList.map(placement => ({
+    ...placement,
+    x: x + placement.x,
+    y: y + placement.y
+  }))
+  const lineList = createTextDecorationLines(absolutePlacementList)
+  const minX = Math.min(...absolutePlacementList.map(placement => placement.x))
+  const maxX = Math.max(
+    ...absolutePlacementList.map(placement => placement.x + placement.width)
+  )
+  const top = Math.min(
+    ...absolutePlacementList.map(
+      placement => placement.y - placement.baselineOffset
+    )
+  )
+  const bottom = Math.max(
+    ...absolutePlacementList.map(
+      placement => placement.y - placement.baselineOffset + placement.height
+    )
+  )
+  const rasterX = Math.floor(minX)
+  const rasterY = Math.floor(top)
+  const rasterRight = Math.ceil(maxX)
+  const rasterBottom = Math.ceil(bottom)
+
+  return {
+    absolutePlacementList,
+    lineList,
+    x: rasterX,
+    y: rasterY,
+    width: Math.max(1, rasterRight - rasterX),
+    height: Math.max(1, rasterBottom - rasterY)
+  }
+}
+
+async function createTextWatermarkRasterBlock(payload: {
+  pageNo: number
+  pageCount: number
+  pageWidth: number
+  pageHeight: number
+  watermark: IDocumentModel['defaults']['watermark']
+}) {
+  if (
+    !payload.watermark.data ||
+    payload.watermark.type === WatermarkType.IMAGE
+  ) {
+    return null
+  }
+
+  const measureWidth = createMeasureWidth(
+    payload.watermark.font,
+    payload.watermark.size
+  )
+  const placement = createWatermarkPlacement({
+    pageNo: payload.pageNo,
+    pageCount: payload.pageCount,
+    pageWidth: payload.pageWidth,
+    pageHeight: payload.pageHeight,
+    data: payload.watermark.data,
+    numberType: payload.watermark.numberType,
+    font: payload.watermark.font,
+    size: payload.watermark.size,
+    color: payload.watermark.color,
+    opacity: payload.watermark.opacity,
+    measureWidth
+  })
+
+  if (!placement?.text) {
+    return null
+  }
+
+  const watermark = payload.watermark
+  const metric = measureText(
+    placement.text,
+    watermark.font,
+    watermark.size
+  )
+  if (watermark.repeat) {
+    const rasterBlock = await rasterizeElement(
+      ctx => {
+        ctx.save()
+        ctx.globalAlpha = watermark.opacity
+        ctx.font = `${watermark.size}px ${watermark.font}`
+        ctx.fillStyle = watermark.color
+
+        const temporaryCanvas = document.createElement('canvas')
+        const temporaryCtx = temporaryCanvas.getContext('2d')
+        if (!temporaryCtx) {
+          throw new Error('Watermark pattern canvas context is unavailable')
+        }
+
+        const textWidth = metric.width
+        const textHeight = metric.ascent + metric.descent
+        const diagonalLength = Math.sqrt(
+          Math.pow(textWidth, 2) + Math.pow(textHeight, 2)
+        )
+        const patternWidth = diagonalLength + 2 * watermark.gap[0]
+        const patternHeight = diagonalLength + 2 * watermark.gap[1]
+
+        temporaryCanvas.width = Math.max(1, Math.ceil(patternWidth))
+        temporaryCanvas.height = Math.max(1, Math.ceil(patternHeight))
+        temporaryCtx.translate(patternWidth / 2, patternHeight / 2)
+        temporaryCtx.rotate((-45 * Math.PI) / 180)
+        temporaryCtx.translate(-patternWidth / 2, -patternHeight / 2)
+        temporaryCtx.font = `${watermark.size}px ${watermark.font}`
+        temporaryCtx.fillStyle = watermark.color
+        temporaryCtx.fillText(
+          placement.text,
+          (patternWidth - textWidth) / 2,
+          (patternHeight - textHeight) / 2 + metric.ascent
+        )
+
+        const pattern = ctx.createPattern(temporaryCanvas, 'repeat')
+        if (pattern) {
+          ctx.fillStyle = pattern
+          ctx.fillRect(0, 0, payload.pageWidth, payload.pageHeight)
+        }
+        ctx.restore()
+      },
+      payload.pageWidth,
+      payload.pageHeight,
+      'watermark-text',
+      2
+    )
+
+    return {
+      ...rasterBlock,
+      pageNo: payload.pageNo,
+      stage: PDF_RENDER_STAGE.BACKGROUND,
+      layer: 'background' as const,
+      debugLabel: 'text-watermark'
+    }
+  }
+
+  const textHeight = metric.ascent + metric.descent
+  const diagonalLength = Math.sqrt(
+    Math.pow(metric.width, 2) + Math.pow(textHeight, 2)
+  )
+  const rasterSize = Math.max(1, Math.ceil(diagonalLength + 8))
+  const rasterBlock = await rasterizeElement(
+    ctx => {
+      ctx.save()
+      ctx.globalAlpha = watermark.opacity
+      ctx.font = `${watermark.size}px ${watermark.font}`
+      ctx.fillStyle = watermark.color
+      ctx.translate(rasterSize / 2, rasterSize / 2)
+      ctx.rotate((-45 * Math.PI) / 180)
+      ctx.fillText(
+        placement.text,
+        -metric.width / 2,
+        metric.ascent - watermark.size / 2
+      )
+      ctx.restore()
+    },
+    rasterSize,
+    rasterSize,
+    'watermark-text',
+    2
+  )
+
+  return {
+    ...rasterBlock,
+    pageNo: payload.pageNo,
+    stage: PDF_RENDER_STAGE.BACKGROUND,
+    x: (payload.pageWidth - rasterSize) / 2,
+    y: (payload.pageHeight - rasterSize) / 2,
+    layer: 'background' as const,
+    debugLabel: 'text-watermark'
+  }
+}
+
+async function appendFrameDecorations(
   page: IPageModel,
   documentModel: IDocumentModel,
   pageCount: number,
@@ -212,61 +449,15 @@ function appendFrameDecorations(
       })
     })
   } else {
-    const watermarkPlacements = documentModel.defaults.watermark.repeat
-      ? createWatermarkPlacements({
-          pageNo: page.pageNo,
-          pageCount,
-          pageWidth: page.width,
-          pageHeight: page.height,
-          data: documentModel.defaults.watermark.data,
-          numberType: documentModel.defaults.watermark.numberType,
-          font: documentModel.defaults.watermark.font,
-          size: documentModel.defaults.watermark.size,
-          color: documentModel.defaults.watermark.color,
-          opacity: documentModel.defaults.watermark.opacity,
-          repeat: documentModel.defaults.watermark.repeat,
-          gap: [
-            documentModel.defaults.watermark.gap[0],
-            documentModel.defaults.watermark.gap[1]
-          ],
-          measureWidth: createMeasureWidth(
-            documentModel.defaults.watermark.font,
-            documentModel.defaults.watermark.size
-          )
-        })
-      : []
-    const watermarkPlacement =
-      !watermarkPlacements.length
-        ? createWatermarkPlacement({
-            pageNo: page.pageNo,
-            pageCount,
-            pageWidth: page.width,
-            pageHeight: page.height,
-            data: documentModel.defaults.watermark.data,
-            numberType: documentModel.defaults.watermark.numberType,
-            font: documentModel.defaults.watermark.font,
-            size: documentModel.defaults.watermark.size,
-            color: documentModel.defaults.watermark.color,
-            opacity: documentModel.defaults.watermark.opacity,
-            measureWidth: createMeasureWidth(
-              documentModel.defaults.watermark.font,
-              documentModel.defaults.watermark.size
-            )
-          })
-        : null
-    watermarkPlacements.forEach(placement => {
-      page.textRuns.push({
-        pageNo: page.pageNo,
-        stage: PDF_RENDER_STAGE.BACKGROUND,
-        ...placement
-      })
+    const watermarkRasterBlock = await createTextWatermarkRasterBlock({
+      pageNo: page.pageNo,
+      pageCount,
+      pageWidth: page.width,
+      pageHeight: page.height,
+      watermark: documentModel.defaults.watermark
     })
-    if (watermarkPlacement) {
-      page.textRuns.push({
-        pageNo: page.pageNo,
-        stage: PDF_RENDER_STAGE.BACKGROUND,
-        ...watermarkPlacement
-      })
+    if (watermarkRasterBlock) {
+      page.rasterBlocks.push(watermarkRasterBlock)
     }
   }
 
@@ -997,14 +1188,377 @@ function tryResolveSingleLineSurroundSplit(
   ]
 }
 
-function appendResolvedTextLineFragments(
+function shouldRasterizeDenseCjkTextLine(
+  block: IDocumentBlockNode,
+  placementList: IStyledTextPlacementLine['placementList'],
+  stage: number
+) {
+  const isContentStage = stage === PDF_RENDER_STAGE.CONTENT
+  const isHeaderSmallCjkLine = (
+    stage === PDF_RENDER_STAGE.HEADER &&
+    placementList.length > 0 &&
+    placementList.every(placement => {
+      const text = placement.text.replace(/\s/g, '')
+      if (!text) return false
+      const cjkCount = [...text].filter(char => CJK_CHAR_REG.test(char)).length
+      return (
+        cjkCount / text.length >= DENSE_CJK_MIN_RATIO &&
+        placement.size <= 18
+      )
+    })
+  )
+
+  if (!isContentStage && !isHeaderSmallCjkLine) return false
+  if (block.kind !== 'paragraph') return false
+  if (block.element.type === ElementType.HYPERLINK) return false
+
+  const text = placementList
+    .map(placement => placement.text)
+    .join('')
+    .replace(/\s/g, '')
+
+  if (!isHeaderSmallCjkLine && text.length < DENSE_CJK_MIN_LENGTH) return false
+
+  const cjkCount = [...text].filter(char => CJK_CHAR_REG.test(char)).length
+  return cjkCount / text.length >= DENSE_CJK_MIN_RATIO
+}
+
+function shouldRasterizeContentTextLine(
+  block: IDocumentBlockNode,
+  placementList: IStyledTextPlacementLine['placementList'],
+  stage: number
+) {
+  if (stage !== PDF_RENDER_STAGE.CONTENT) {
+    return false
+  }
+  if (block.kind !== 'paragraph') {
+    return false
+  }
+  if (block.element.type === ElementType.HYPERLINK) {
+    return false
+  }
+
+  const text = placementList
+    .map(placement => placement.text)
+    .join('')
+    .replace(/\s/g, '')
+  if (!text) {
+    return false
+  }
+
+  const charList = [...text]
+  const cjkCount = charList.filter(char => CJK_CHAR_REG.test(char)).length
+  if (!cjkCount) {
+    return false
+  }
+
+  const cjkRatio = cjkCount / charList.length
+  const maxSize = Math.max(...placementList.map(placement => placement.size))
+  const alphaCount = charList.filter(char => ASCII_ALPHA_REG.test(char)).length
+  const digitCount = charList.filter(char => DIGIT_REG.test(char)).length
+  const otherCount = charList.length - cjkCount - alphaCount - digitCount
+  const hasMixedScript =
+    alphaCount > 0 ||
+    digitCount > 0 ||
+    otherCount > 0
+  const hasBaselineShift = placementList.some(
+    placement => Math.abs(placement.baselineShift || 0) > 0.001
+  )
+  const isShortSmallCjkLine =
+    charList.length <= SHORT_CJK_LINE_MAX_LENGTH &&
+    maxSize <= SHORT_CJK_LINE_MAX_SIZE &&
+    cjkRatio >= 0.45
+  const isCompactMixedMetricsLine =
+    charList.length <= COMPACT_MIXED_LINE_MAX_LENGTH &&
+    maxSize <= SHORT_CJK_LINE_MAX_SIZE &&
+    digitCount > 0 &&
+    alphaCount > 0 &&
+    otherCount > 0
+  const isShortSymbolHeavyLine =
+    charList.length <= SHORT_CJK_LINE_MAX_LENGTH &&
+    maxSize <= SHORT_CJK_LINE_MAX_SIZE &&
+    otherCount >= 2 &&
+    (cjkCount > 0 || digitCount > 0)
+
+  if (shouldRasterizeDenseCjkTextLine(block, placementList, stage)) {
+    return true
+  }
+
+  if (hasBaselineShift) {
+    return true
+  }
+
+  if (isShortSmallCjkLine) {
+    return true
+  }
+
+  if (isCompactMixedMetricsLine || isShortSymbolHeavyLine) {
+    return true
+  }
+
+  return hasMixedScript && cjkRatio >= 0.2
+}
+
+function createMarkerAwarePlacementList(
+  placementList: IStyledTextPlacementLine['placementList'],
+  markerPlacement?: IStyledTextPlacementLine['placementList'][number] | null
+) {
+  if (!markerPlacement) {
+    return placementList
+  }
+
+  return [
+    { ...markerPlacement },
+    ...placementList.map(placement => ({ ...placement }))
+  ]
+}
+
+function isStaticHeaderSmallCjkLine(
+  placementList: IStyledTextPlacementLine['placementList'],
+  stage: number
+) {
+  return (
+    stage === PDF_RENDER_STAGE.HEADER &&
+    placementList.length > 0 &&
+    placementList.every(placement => {
+      const text = placement.text.replace(/\s/g, '')
+      if (!text) return false
+      const cjkCount = [...text].filter(char => CJK_CHAR_REG.test(char)).length
+      return (
+        cjkCount / text.length >= DENSE_CJK_MIN_RATIO &&
+        placement.size <= 18
+      )
+    })
+  )
+}
+
+async function appendPlacementTextRasterFallback(
+  page: IPageModel,
+  block: IDocumentBlockNode,
+  placementList: IStyledTextPlacementLine['placementList'],
+  x: number,
+  y: number,
+  stage: number,
+  documentModel: IDocumentModel
+) {
+  if (
+    !shouldRasterizeDenseCjkTextLine(block, placementList, stage) &&
+    !shouldRasterizeContentTextLine(block, placementList, stage)
+  ) {
+    return false
+  }
+
+  const bounds = resolvePlacementRasterBounds(placementList, x, y)
+
+  const printPageDataUrl = documentModel.printPageDataUrlList?.[page.pageNo]
+  if (printPageDataUrl) {
+    const dataUrl = await cropPageRegionDataUrl(printPageDataUrl, {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height
+    })
+
+    resolveFallback(page, {
+      pageNo: page.pageNo,
+      stage,
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      dataUrl,
+      sourceType: DENSE_CJK_FALLBACK_SOURCE_TYPE,
+      layer: 'content'
+    })
+
+    return true
+  }
+
+  const fallback = await rasterizeElement(
+    ctx => {
+      ctx.textBaseline = 'alphabetic'
+      ctx.direction = 'ltr'
+      ;(ctx as any).letterSpacing = '0px'
+      ;(ctx as any).wordSpacing = '0px'
+
+      if (block.element.highlight) {
+        ctx.save()
+        ctx.globalAlpha = 0.35
+        ctx.fillStyle = block.element.highlight
+        bounds.absolutePlacementList.forEach(placement => {
+          ctx.fillRect(
+            placement.x - bounds.x,
+            placement.y - placement.baselineOffset - bounds.y,
+            placement.width,
+            placement.height
+          )
+        })
+        ctx.restore()
+      }
+
+      bounds.absolutePlacementList.forEach(placement => {
+        ctx.save()
+        ctx.font = `${placement.italic ? 'italic ' : ''}${placement.bold ? 'bold ' : ''}${placement.size}px ${placement.font}`
+        ctx.fillStyle = placement.color || '#000000'
+        ;(ctx as any).letterSpacing = `${placement.letterSpacing || 0}px`
+        ctx.fillText(
+          placement.text,
+          placement.x - bounds.x,
+          placement.y - bounds.y
+        )
+        ctx.restore()
+      })
+
+      bounds.lineList.forEach(line => {
+        ctx.save()
+        ctx.strokeStyle = line.color || '#000000'
+        ctx.lineWidth = line.width || 1
+        if (line.dash?.length) {
+          ctx.setLineDash(line.dash)
+        }
+        ctx.beginPath()
+        ctx.moveTo(line.x1 - bounds.x, line.y1 - bounds.y)
+        ctx.lineTo(line.x2 - bounds.x, line.y2 - bounds.y)
+        ctx.stroke()
+        ctx.restore()
+      })
+    },
+    bounds.width,
+    bounds.height,
+    DENSE_CJK_FALLBACK_SOURCE_TYPE,
+    DENSE_CJK_FALLBACK_PIXEL_RATIO
+  )
+
+  resolveFallback(page, {
+    ...fallback,
+    pageNo: page.pageNo,
+    stage,
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    layer: 'content'
+  })
+
+  return true
+}
+
+async function appendStaticZoneTextRasterFallback(
+  page: IPageModel,
+  block: IDocumentBlockNode,
+  placementList: IStyledTextPlacementLine['placementList'],
+  x: number,
+  y: number,
+  stage: number,
+  documentModel: IDocumentModel
+) {
+  if (!isStaticHeaderSmallCjkLine(placementList, stage)) {
+    return false
+  }
+
+  const bounds = resolvePlacementRasterBounds(placementList, x, y)
+
+  const printPageDataUrl = documentModel.printPageDataUrlList?.[page.pageNo]
+  if (printPageDataUrl) {
+    const dataUrl = await cropPageRegionDataUrl(printPageDataUrl, {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height
+    })
+
+    resolveFallback(page, {
+      pageNo: page.pageNo,
+      stage,
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      dataUrl,
+      sourceType: DENSE_CJK_FALLBACK_SOURCE_TYPE,
+      layer: 'content'
+    })
+
+    return true
+  }
+
+  const fallback = await rasterizeElement(
+    ctx => {
+      ctx.textBaseline = 'alphabetic'
+      ctx.direction = 'ltr'
+      ;(ctx as any).letterSpacing = '0px'
+      ;(ctx as any).wordSpacing = '0px'
+
+      if (block.element.highlight) {
+        ctx.save()
+        ctx.globalAlpha = 0.35
+        ctx.fillStyle = block.element.highlight
+        bounds.absolutePlacementList.forEach(placement => {
+          ctx.fillRect(
+            placement.x - bounds.x,
+            placement.y - placement.baselineOffset - bounds.y,
+            placement.width,
+            placement.height
+          )
+        })
+        ctx.restore()
+      }
+
+      bounds.absolutePlacementList.forEach(placement => {
+        ctx.save()
+        ctx.font = `${placement.italic ? 'italic ' : ''}${placement.bold ? 'bold ' : ''}${placement.size}px ${placement.font}`
+        ctx.fillStyle = placement.color || '#000000'
+        ;(ctx as any).letterSpacing = `${placement.letterSpacing || 0}px`
+        ctx.fillText(
+          placement.text,
+          placement.x - bounds.x,
+          placement.y - bounds.y
+        )
+        ctx.restore()
+      })
+
+      bounds.lineList.forEach(line => {
+        ctx.save()
+        ctx.strokeStyle = line.color || '#000000'
+        ctx.lineWidth = line.width || 1
+        if (line.dash?.length) {
+          ctx.setLineDash(line.dash)
+        }
+        ctx.beginPath()
+        ctx.moveTo(line.x1 - bounds.x, line.y1 - bounds.y)
+        ctx.lineTo(line.x2 - bounds.x, line.y2 - bounds.y)
+        ctx.stroke()
+        ctx.restore()
+      })
+    },
+    bounds.width,
+    bounds.height,
+    DENSE_CJK_FALLBACK_SOURCE_TYPE,
+    DENSE_CJK_FALLBACK_PIXEL_RATIO
+  )
+
+  resolveFallback(page, {
+    ...fallback,
+    pageNo: page.pageNo,
+    stage,
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    layer: 'content'
+  })
+
+  return true
+}
+
+async function appendResolvedTextLineFragments(
   page: IPageModel,
   block: IDocumentBlockNode,
   fragmentList: IResolvedSurroundTextLineFragment[],
-  lineX: number,
   textStyle: IResolvedBlockTextStyle,
   listSemantic: IListBlockSemantics,
   lineIndex: number,
+  documentModel: IDocumentModel,
   stage: number = PDF_RENDER_STAGE.CONTENT
 ) {
   const firstFragment = fragmentList[0]
@@ -1021,28 +1575,60 @@ function appendResolvedTextLineFragments(
       baselineOffset:
         firstFragment.placementList[0]?.baselineOffset || textStyle.size
     })
-    if (markerPlacement) {
+    for (let fragmentIndex = 0; fragmentIndex < fragmentList.length; fragmentIndex++) {
+      const fragment = fragmentList[fragmentIndex]
+      const contentY = fragment.y + textStyle.rowMargin
+      const renderPlacementList = createMarkerAwarePlacementList(
+        fragment.placementList,
+        fragmentIndex === 0 ? markerPlacement : null
+      )
+      const fallbackApplied = await appendPlacementTextRasterFallback(
+        page,
+        block,
+        renderPlacementList,
+        fragment.x,
+        contentY,
+        stage,
+        documentModel
+      )
+      if (fallbackApplied) {
+        continue
+      }
       appendPlacementTextRuns(
         page,
         block,
-        [markerPlacement],
-        lineX,
-        firstFragment.y + textStyle.rowMargin,
+        renderPlacementList,
+        fragment.x,
+        contentY,
         stage
       )
     }
+    return
   }
 
-  fragmentList.forEach(fragment => {
+  for (const fragment of fragmentList) {
+    const contentY = fragment.y + textStyle.rowMargin
+    const fallbackApplied = await appendPlacementTextRasterFallback(
+      page,
+      block,
+      fragment.placementList,
+      fragment.x,
+      contentY,
+      stage,
+      documentModel
+    )
+    if (fallbackApplied) {
+      continue
+    }
     appendPlacementTextRuns(
       page,
       block,
       fragment.placementList,
       fragment.x,
-      fragment.y + textStyle.rowMargin,
+      contentY,
       stage
     )
-  })
+  }
 }
 
 function resolveSurroundTextLinePlacement(
@@ -1497,11 +2083,7 @@ function getBlockLayoutHeight(
   }
 
   if (block.element.type === ElementType.SEPARATOR) {
-    const rowMargin = resolveBlockTextStyle(
-      block.element,
-      documentModel.defaults
-    ).rowMargin
-    return rowMargin * 2 + (block.element.lineWidth || 1)
+    return block.element.lineWidth || 1
   }
 
   const textStyle = resolveBlockTextStyle(block.element, documentModel.defaults)
@@ -1734,33 +2316,6 @@ function appendPlacementTextRuns(
       })
     })
   }
-}
-
-function appendResolvedTextLine(
-  page: IPageModel,
-  block: IDocumentBlockNode,
-  line: IStyledTextPlacementLine,
-  textStyle: IResolvedBlockTextStyle,
-  listSemantic: IListBlockSemantics,
-  x: number,
-  y: number,
-  lineIndex: number,
-  stage: number = PDF_RENDER_STAGE.CONTENT
-) {
-  const lineY = y + textStyle.rowMargin
-  if (lineIndex === 0) {
-    const markerPlacement = createListMarkerPlacement({
-      semantic: listSemantic,
-      x: 0,
-      y: 0,
-      height: line.height,
-      baselineOffset: line.baselineOffset
-    })
-    if (markerPlacement) {
-      appendPlacementTextRuns(page, block, [markerPlacement], x, lineY, stage)
-    }
-  }
-  appendPlacementTextRuns(page, block, line.placementList, x, lineY, stage)
 }
 
 function appendTableRow(
@@ -2107,14 +2662,14 @@ async function appendPlacement(
       width,
       documentModel.main.blockList
     )
-    appendResolvedTextLineFragments(
+    await appendResolvedTextLineFragments(
       page,
       placement.block,
       surroundPlacement.fragmentList,
-      x,
       placement.textStyle,
       placement.listSemantic,
-      placement.lineIndex
+      placement.lineIndex,
+      documentModel
     )
     return {
       renderX: surroundPlacement.x,
@@ -2133,6 +2688,8 @@ async function appendPlacement(
   }
 
   if (placement.block.element.type === ElementType.SEPARATOR) {
+    const lineWidth = placement.block.element.lineWidth || 1
+    const baseY = y + (placement.height - lineWidth) / 2
     page.vectorLines.push({
       pageNo: page.pageNo,
       ...createSeparatorVectorLine({
@@ -2141,7 +2698,8 @@ async function appendPlacement(
           width: placement.block.element.width || width
         },
         x,
-        y: y + placement.height / 2
+        y: y + placement.height / 2,
+        baseY
       })
     })
     return {
@@ -2281,10 +2839,7 @@ async function appendStaticZone(
       }
 
       if (block.element.type === ElementType.SEPARATOR) {
-        const rowMargin = resolveBlockTextStyle(
-          block.element,
-          documentModel.defaults
-        ).rowMargin
+        const lineWidth = block.element.lineWidth || 1
         page.vectorLines.push({
           pageNo: page.pageNo,
           stage,
@@ -2294,10 +2849,11 @@ async function appendStaticZone(
               width: block.element.width || width
             },
             x,
-            y: cursorY + rowMargin + (block.element.lineWidth || 1) / 2
+            y: cursorY + lineWidth / 2,
+            baseY: cursorY
           })
         })
-        cursorY += rowMargin * 2 + (block.element.lineWidth || 1)
+        cursorY += lineWidth
         continue
       }
 
@@ -2311,18 +2867,43 @@ async function appendStaticZone(
         documentModel,
         listSemanticMap.get(block)
       )
-      resolved.lineList.forEach((line, lineIndex) => {
-        appendResolvedTextLine(
+      for (let lineIndex = 0; lineIndex < resolved.lineList.length; lineIndex++) {
+        const line = resolved.lineList[lineIndex]
+        const lineY = cursorY + resolved.textStyle.rowMargin
+        const markerPlacement = lineIndex === 0
+          ? createListMarkerPlacement({
+              semantic: resolved.listSemantic,
+              x: 0,
+              y: 0,
+              height: line.height,
+              baselineOffset: line.baselineOffset
+            })
+          : null
+        const renderPlacementList = createMarkerAwarePlacementList(
+          line.placementList,
+          markerPlacement
+        )
+
+        const fallbackApplied = await appendStaticZoneTextRasterFallback(
           page,
           block,
-          line,
-          resolved.textStyle,
-          resolved.listSemantic,
+          renderPlacementList,
           x,
-          cursorY,
-          lineIndex,
-          stage
+          lineY,
+          stage,
+          documentModel
         )
+        if (!fallbackApplied) {
+          appendPlacementTextRuns(
+            page,
+            block,
+            renderPlacementList,
+            x,
+            lineY,
+            stage
+          )
+        }
+
         if (block.kind === 'control' && block.element.control?.border) {
           const left = x + Math.min(...line.placementList.map(item => item.x))
           const right = x + Math.max(
@@ -2345,7 +2926,7 @@ async function appendStaticZone(
           }
         }
         cursorY += line.height + resolved.textStyle.rowMargin * 2
-      })
+      }
       if (!resolved.lineList.length) {
         cursorY += resolved.height
       }
@@ -2455,11 +3036,7 @@ function measureStaticZoneHeight(
       }
 
       if (block.element.type === ElementType.SEPARATOR) {
-        const rowMargin = resolveBlockTextStyle(
-          block.element,
-          documentModel.defaults
-        ).rowMargin
-        totalHeight += rowMargin * 2 + (block.element.lineWidth || 1)
+        totalHeight += block.element.lineWidth || 1
         return
       }
 

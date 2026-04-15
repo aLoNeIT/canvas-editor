@@ -69,6 +69,14 @@ export interface IDocumentLayoutDefaults {
   defaultColor: string
   defaultRowMargin: number
   defaultBasicRowMarginHeight: number
+  header: {
+    top: number
+    disabled: boolean
+  }
+  footer: {
+    bottom: number
+    disabled: boolean
+  }
   backgroundColor: string
   backgroundImage: string
   backgroundSize: BackgroundSize
@@ -157,6 +165,7 @@ export interface IDocumentModel {
   height: number
   margins: number[]
   scale: number
+  printPageDataUrlList?: string[]
   defaults: IDocumentLayoutDefaults
   badge?: IDocumentBadgeState
   header: IZoneModel
