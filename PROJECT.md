@@ -8,7 +8,8 @@
 - PDF 导出必须由插件自行完成排版、分页、绘制。
 - 核心只允许提供极少量通用只读能力，不允许出现 PDF 专用核心接口。
 - 修复必须尽量落在“底层渲染机制一致性”层面，而不是只针对当前 demo 做坐标补丁。
-- 在无法稳定复现浏览器 Canvas 效果的高风险区域，允许插件内部使用通用 raster fallback，但该 fallback 必须是插件内聚能力。
+- 插件开发中，正常功能禁止回退使用位图方案，哪怕当前向量/文本渲染存在失败、缺失或视觉偏差，也不能用位图兜底替代正常功能输出。
+- `rasterBlocks` 仅允许保留天然位图语义或明确非文本/非向量的内容，例如图片、LaTeX 位图资产、明确约定的背景类资源；不能作为正常文本、表头、正文、表格线等功能的回退方案。
 
 当前判断标准不是“导出成功”，而是“导出的真实 PDF 经 pdf.js 渲染后，和核心 Canvas 打印图尽量一致”。
 
@@ -120,7 +121,7 @@
 - 布局 header / footer / main
 - 生成表格线、页边框、页码、行号、separator 等向量对象
 - 生成文本放置对象
-- 对高风险内容触发插件内 raster fallback
+- 正常功能优先走文本/向量/结构化布局路径，禁止把渲染失败内容回退为位图输出
 
 ### 3.3 插件绘制细节
 
@@ -139,12 +140,16 @@ PDF 输出主入口见 [renderPdf.ts](/d:/Work/Project/JavaScript/canvas-editor/
 - [rasterizeElement.ts](/d:/Work/Project/JavaScript/canvas-editor/src/plugins/jspdf/fallback/rasterizeElement.ts)
 - [resolveFallback.ts](/d:/Work/Project/JavaScript/canvas-editor/src/plugins/jspdf/fallback/resolveFallback.ts)
 
-已经实现的通用策略包括：
+当前允许保留的位图策略包括：
 
-- 对高风险正文 CJK 行改走插件内 raster fallback
-- fallback bounds 做 `floor/ceil` 整数化，减少 PDF 图像再采样误差
 - 对 `latex` 生成独立 raster block
-- 对背景文本水印改为插件内 raster block
+- 对背景类资源生成独立 raster block
+
+明确禁止的策略包括：
+
+- 对正文文本、表头文本、页眉页脚文本回退为 raster block
+- 对表格线、分隔线、页边框等向量对象回退为 raster block
+- 因“当前不好对齐 Canvas”就将正常功能整体截图或局部截图后嵌入 PDF
 
 ## 4. 当前执行到什么程度
 
@@ -153,7 +158,7 @@ PDF 输出主入口见 [renderPdf.ts](/d:/Work/Project/JavaScript/canvas-editor/
 1. 已经完成从“核心快照导出 PDF”向“插件独立排版引擎”的迁移主线。
 2. 已经补齐插件侧大量页面模型、布局、渲染、诊断能力。
 3. header 区域当前和核心已经比较接近。
-4. 正文大段 CJK 文本的主差异，已经通过插件内通用 raster fallback 基本压下去。
+4. 正文、表头、页眉页脚等正常功能已经明确禁止使用位图 fallback 兜底，后续修复必须继续落在文本、向量和布局计算路径本身。
 5. LaTeX 已经支持导出，当前走 raster block。
 6. iframe / video 已明确记录为暂缓项。
 7. 已建立比较完整的视觉诊断体系，可以针对局部热点做溯源和消融分析。
@@ -173,11 +178,11 @@ PDF 输出主入口见 [renderPdf.ts](/d:/Work/Project/JavaScript/canvas-editor/
 
 ### 5.1 page 1
 
-page 1 主要热点仍然集中在正文 fallback 行区域，但需要注意：
+page 1 主要热点曾经集中在正文 fallback 行区域，但这些结论只作为历史诊断背景，不再代表当前允许继续沿用该策略：
 
-- 当前这些热点大多同时覆盖了背景水印 raster block 和正文 raster block。
-- 早先针对正文 fallback block 的专项诊断中，很多 block 已经达到 `sourceToPdf = 0`。
-- 这说明 page 1 当前最差块不一定是“正文 fallback 自身错误”，而可能是“水印与正文叠加后造成的局部差异”。
+- 当前这些热点大多同时覆盖了背景水印 raster block 和历史上的正文 raster block。
+- 早先针对正文 fallback block 的专项诊断，仅可用于定位当时问题来源，不能再作为保留正文位图方案的依据。
+- 当前应将此类热点重新解释为“文本/布局链路仍需修复”，而不是“继续使用正文 fallback”。
 
 ### 5.2 page 2
 
@@ -204,13 +209,13 @@ page 2 已通过组件消融明确了主因分布：
 
 ## 6. 当前已落地的关键改动
 
-### 6.1 正文文本 fallback
+### 6.1 正文文本链路修复约束
 
 在 [layoutDocument.ts](/d:/Work/Project/JavaScript/canvas-editor/src/plugins/jspdf/layout/layoutDocument.ts) 中：
 
-- 对高风险 CJK 内容行启用插件内 raster fallback。
-- 对 ordered-list marker 与正文首行做统一 placement/fallback 处理。
-- 对 fallback raster bounds 使用整数边界，减少裁剪和 PDF 缩放误差。
+- 正文文本、表头文本、页眉页脚文本必须保持真实文本输出，不允许再引入 raster fallback。
+- ordered-list marker 与正文首行的统一处理，必须继续落在 placement、换行、字体度量和布局计算路径上。
+- 任何缺字、错位、换行异常，都应修复文本与布局逻辑本身，不能改为截图或局部位图。
 
 ### 6.2 背景文本水印 raster 化
 
@@ -248,10 +253,10 @@ page 2 已通过组件消融明确了主因分布：
 
 ### 7.2 中优先级
 
-4. page 1 当前热点需要继续拆分“正文 fallback 本身”与“背景水印叠加”的贡献。
+4. page 1 当前热点需要继续拆分“文本/布局链路问题本身”与“背景水印叠加”的贡献。
 
 5. 需要继续完善局部诊断，尤其是：
-   - 单个 raster block 的 source / fallback / pdf 三方比对
+   - 单个 raster block 的 source / pdf 对比，仅用于图片、LaTeX、背景类资源
    - 表格线与浏览器 Canvas 描边规则的针对性实验
 
 ### 7.3 暂缓项
@@ -295,10 +300,10 @@ page 2 已通过组件消融明确了主因分布：
 建议其他模型重点分析以下问题：
 
 1. jsPDF 的 `line()` 语义与浏览器 Canvas `stroke()` 在 1px 表格线上的差异，是否需要更深层的模拟，而不是简单坐标偏移。
-2. 表格线是否应在插件内部局部 raster 化，而不是继续坚持向量线输出。
+2. 表格线如何继续逼近浏览器 Canvas 描边结果，同时保持向量输出。
 3. `latex` 图块与普通图片图块在 addImage / pdf.js 渲染链路中，是否存在统一的采样误差。
 4. 当前背景文本水印 raster 化是否还有进一步缩小包围盒或提高像素比的空间。
-5. page 1 热点中“背景水印 + 正文 fallback”叠加是否需要重新分层或重排操作顺序。
+5. page 1 热点中“背景水印 + 文本链路问题”叠加是否需要重新分层或重排操作顺序。
 
 ## 10. 当前状态总结
 
@@ -314,4 +319,4 @@ page 2 已通过组件消融明确了主因分布：
 从审计角度看，当前最值得投入分析的不是“总体架构是否正确”，而是：
 
 - jsPDF 向量线如何复现浏览器 Canvas 表格描边
-- 某些高风险区域是否应该继续使用插件内通用 raster 路径
+- 文本、表格线、页眉页脚等正常功能如何在不使用位图兜底的前提下继续收敛视觉差异

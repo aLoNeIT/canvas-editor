@@ -46,7 +46,10 @@ import {
   measureTableRowHeight,
   resolveTableRowHeightList
 } from '../src/plugins/jspdf/layout/tableMetrics.js'
-import { layoutDocument } from '../src/plugins/jspdf/layout/layoutDocument.js'
+import {
+  collectLayoutDebugSummary,
+  layoutDocument
+} from '../src/plugins/jspdf/layout/layoutDocument.js'
 import { normalizeDocument } from '../src/plugins/jspdf/normalize/normalizeDocument.js'
 import {
   resolveBlockTextStyle,
@@ -5819,6 +5822,94 @@ async function testLayoutDocumentRendersTitleWrapperWithMappedSize() {
   }
 }
 
+function createFontAwareRuntimeDocument() {
+  return {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(this: { font: string }, text: string) {
+              const sizeMatch = this.font.match(/(\d+(?:\.\d+)?)px/)
+              const size = sizeMatch ? Number(sizeMatch[1]) : 12
+              return {
+                width: text.length * size,
+                actualBoundingBoxAscent: size * 0.8,
+                actualBoundingBoxDescent: size * 0.2
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+function testLayoutDocumentUsesExplicitChildLineHeightInsideTitleWrapper() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = createFontAwareRuntimeDocument()
+
+  try {
+    const layoutSummary = collectLayoutDebugSummary(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.TITLE,
+                value: '',
+                level: TitleLevel.FIRST,
+                titleId: 'title-3',
+                valueList: [
+                  {
+                    value: '主诉：',
+                    size: 18
+                  }
+                ]
+              },
+              {
+                value: '\n发热三天，咳嗽五天。',
+                size: 16
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions()
+      } as any)
+    )
+
+    assert.deepEqual(
+      layoutSummary.blockSummaryList
+        .slice(0, 2)
+        .map(block => ({
+          textPreview: block.textPreview,
+          consumedHeight: block.consumedHeight
+        })),
+      [
+        {
+          textPreview: '主诉：',
+          consumedHeight: 33
+        },
+        {
+          textPreview: '发热三天，咳嗽五天。',
+          consumedHeight: 32
+        }
+      ]
+    )
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
 async function testLayoutDocumentKeepsTitleWrapperInlineChildrenInOneBlock() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
@@ -10110,8 +10201,221 @@ async function testLayoutDocumentDoesNotAddBlankHeaderLineForLeadingNewline() {
     assert.ok(subtitleRun)
     assert.ok(headerSeparator)
     assert.equal(subtitleRun.y, 98)
-    assert.equal(headerSeparator.y1, 82.5)
-    assert.equal(roundTo3(headerSeparator.y1 - subtitleRun.y), -15.5)
+    assert.equal(headerSeparator.y1, 108.5)
+    assert.equal(headerSeparator.y1 - subtitleRun.y, 10.5)
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentKeepsHeaderCjkSubtitleAsTextWhenFallbackDisabled() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+  let toDataUrlCallCount = 0
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        width: 0,
+        height: 0,
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            },
+            fillRect() {
+              return undefined
+            },
+            fillText() {
+              return undefined
+            },
+            beginPath() {
+              return undefined
+            },
+            moveTo() {
+              return undefined
+            },
+            lineTo() {
+              return undefined
+            },
+            stroke() {
+              return undefined
+            },
+            save() {
+              return undefined
+            },
+            restore() {
+              return undefined
+            },
+            setLineDash() {
+              return undefined
+            }
+          }
+        },
+        toDataURL() {
+          toDataUrlCallCount += 1
+          return 'data:image/png;base64,unexpected-header-cjk-fallback'
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [
+              {
+                value: '第一人民医院\n门诊病历',
+                size: 18,
+                rowFlex: RowFlex.CENTER
+              }
+            ],
+            main: [
+              {
+                value: 'Body'
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: createRuntimeSourceOptions(),
+        exportOptions: {
+          disableTextRasterFallback: true
+        }
+      } as any)
+    )
+
+    const page = pageList[0]
+    const titleRun = page.textRuns.find(
+      run => run.text === '第一人民医院' && run.stage === 40
+    ) as any
+    const subtitleRun = page.textRuns.find(
+      run => run.text === '门诊病历' && run.stage === 40
+    ) as any
+    const headerTextFallback = page.rasterBlocks.find(
+      block =>
+        block.stage === 40 &&
+        block.sourceType === 'text-line-cjk'
+    )
+
+    assert.ok(titleRun)
+    assert.ok(subtitleRun)
+    assert.equal(headerTextFallback, undefined)
+    assert.equal(toDataUrlCallCount, 0)
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentKeepsTableIntrinsicWidthInContentFlow() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 8,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 4
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.TABLE,
+                value: '',
+                width: 520,
+                colgroup: [
+                  { width: 180 },
+                  { width: 80 },
+                  { width: 130 },
+                  { width: 130 }
+                ],
+                trList: [
+                  {
+                    height: 42,
+                    tdList: [
+                      createTd('1.'),
+                      createTd('2.'),
+                      createTd('3.', 2)
+                    ]
+                  },
+                  {
+                    height: 42,
+                    tdList: [
+                      createTd('4.'),
+                      createTd('5.'),
+                      createTd('6.')
+                    ]
+                  },
+                  {
+                    height: 42,
+                    tdList: [
+                      createTd('7.'),
+                      createTd('8.'),
+                      createTd('9.'),
+                      createTd('10.')
+                    ]
+                  }
+                ]
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: {
+          ...createRuntimeSourceOptions(),
+          width: 794,
+          height: 1123,
+          margins: [100, 120, 100, 120]
+        }
+      } as any)
+    )
+
+    const page = pageList[0]
+    const contentLines = page.vectorLines.filter(line => line.stage === 30)
+    const rightEdgeLine = contentLines.find(
+      line => line.x1 === line.x2 && Math.abs(line.x1 - 640) < 0.001
+    )
+    const stretchedRightEdgeLine = contentLines.find(
+      line => line.x1 === line.x2 && Math.abs(line.x1 - 674) < 0.001
+    )
+
+    assert.ok(rightEdgeLine)
+    assert.equal(stretchedRightEdgeLine, undefined)
   } finally {
     runtimeGlobal.document = previousDocument
   }
@@ -12248,6 +12552,56 @@ async function testJspdfPluginRejectsMissingPageModels() {
   }
 }
 
+async function testJspdfPluginDisablesTextRasterFallbackByDefault() {
+  const pageModels = [
+    createJspdfPageModel({
+      pageNo: 0
+    })
+  ]
+  const harness = createJspdfPluginCommandHarness({
+    pageModels,
+    renderPdfResult: 'QUJDRA=='
+  })
+
+  try {
+    harness.jspdfPlugin(harness.editor as any, {
+      defaultFontFamily: 'PluginSong'
+    })
+
+    const result = await (harness.editor.command as any).executeExportPdfBase64()
+
+    assert.equal(result, 'QUJDRA==')
+    assert.deepEqual(
+      harness.callList.map(item => item.kind),
+      [
+        'readEditorPrintPageDataUrlList',
+        'readEditorState',
+        'normalizeDocument',
+        'layoutDocument',
+        'renderPdfBase64'
+      ]
+    )
+    assert.deepEqual(harness.callList[1].payload, {
+      editor: harness.editor,
+      finalOption: {
+        defaultFontFamily: 'PluginSong',
+        disableTextRasterFallback: true,
+        mode: EditorMode.PRINT
+      }
+    })
+    assert.deepEqual(harness.callList[4].payload, {
+      pageModels,
+      finalOption: {
+        defaultFontFamily: 'PluginSong',
+        disableTextRasterFallback: true,
+        mode: EditorMode.PRINT
+      }
+    })
+  } finally {
+    harness.restore()
+  }
+}
+
 async function testJspdfPluginDebugRejectsFallbackBlocks() {
   const harness = createJspdfPluginCommandHarness({
     pageModels: [
@@ -12461,6 +12815,7 @@ async function run() {
   await testLayoutDocumentRendersTableInsideAreaWrapper()
   await testLayoutDocumentRendersImageCaptionAndReservesHeight()
   await testLayoutDocumentRendersTitleWrapperWithMappedSize()
+  testLayoutDocumentUsesExplicitChildLineHeightInsideTitleWrapper()
   await testLayoutDocumentKeepsTitleWrapperInlineChildrenInOneBlock()
   await testLayoutDocumentRendersHyperlinkWrapperLinks()
   await testLayoutDocumentSplitsHyperlinkLinksAroundSurroundImage()
@@ -12498,6 +12853,8 @@ async function run() {
   await testLayoutDocumentAssignsLabelAndSeparatorStages()
   await testLayoutDocumentAssignsStaticZoneBlockStages()
   await testLayoutDocumentDoesNotAddBlankHeaderLineForLeadingNewline()
+  await testLayoutDocumentKeepsHeaderCjkSubtitleAsTextWhenFallbackDisabled()
+  await testLayoutDocumentKeepsTableIntrinsicWidthInContentFlow()
   await testLayoutDocumentAssignsStaticZoneControlBorderStage()
   await testLayoutDocumentRendersStaticZoneLatex()
   testCreatesCenteredPageNumberPlacement()
@@ -12534,6 +12891,7 @@ async function run() {
   await testJspdfPluginReturnsDiagnosticsFromPageModels()
   await testJspdfPluginRejectsNonPrintExportMode()
   await testJspdfPluginRejectsMissingPageModels()
+  await testJspdfPluginDisablesTextRasterFallbackByDefault()
   await testJspdfPluginDebugRejectsFallbackBlocks()
   await testJspdfPluginDebugRejectsLayoutWarnings()
   await testJspdfPluginDebugRejectsEmptyRenderedPage()

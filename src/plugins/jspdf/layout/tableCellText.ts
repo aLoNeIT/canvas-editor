@@ -358,7 +358,17 @@ export function extractElementTextRuns(
       })
     }
     if (element.valueList?.length) {
-      runList.push(...extractElementTextRuns(element.valueList, style))
+      runList.push(
+        ...extractElementTextRuns(
+          element.valueList,
+          element.type === ElementType.TITLE
+            ? {
+                ...style,
+                lineHeight: undefined
+              }
+            : style
+        )
+      )
     } else if (element.type === ElementType.CONTROL) {
       const controlElementList = getControlTextElements(element, style)
       if (controlElementList.length) {

@@ -46,7 +46,9 @@ export async function renderPdfBase64(
   const doc = new jsPDF({
     orientation,
     unit: 'pt',
-    format: [first.width, first.height]
+    format: [first.width, first.height],
+    compress: true,
+    putOnlyUsedFonts: true
   })
 
   const { defaultFontFamily } = await bootstrapPdfFonts(doc, options)

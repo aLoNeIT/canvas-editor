@@ -125,10 +125,13 @@ window.onload = async function () {
   Reflect.set(window, 'editor', instance)
   // canvas-editor-devtools使用
   Reflect.set(window, '__CANVAS_EDITOR_INSTANCE__', instance)
+  const defaultPdfExportOption = {
+    disableTextRasterFallback: true
+  }
   const exportPdfBase64 = async () => {
     const pdfBase64 = await (
       instance.command as CommandWithJspdf
-    ).executeExportPdfBase64()
+    ).executeExportPdfBase64(defaultPdfExportOption)
     const pdfHeader = atob(pdfBase64).slice(0, 4)
     console.log('pdf header', pdfHeader)
     console.log('pdf base64 length', pdfBase64.length)
@@ -196,7 +199,8 @@ window.onload = async function () {
   }
   const debugPdfLayout = async () => {
     const source = readEditorState(instance, {
-      mode: EditorMode.PRINT
+      mode: EditorMode.PRINT,
+      ...defaultPdfExportOption
     })
     const documentModel = normalizeDocument(source)
     const pageModels = await layoutDocument(documentModel)
@@ -251,7 +255,8 @@ window.onload = async function () {
   }
   const debugPdfPageModels = async () => {
     const source = readEditorState(instance, {
-      mode: EditorMode.PRINT
+      mode: EditorMode.PRINT,
+      ...defaultPdfExportOption
     })
     const documentModel = normalizeDocument(source)
     const pageModels = await layoutDocument(documentModel)
@@ -425,11 +430,66 @@ window.onload = async function () {
       shadowRoot.remove()
     }
   }
+  const debugCoreMainLayout = async () => {
+    const snapshot = instance.command.getValue()
+    const shadowRoot = document.createElement('div')
+    shadowRoot.style.position = 'fixed'
+    shadowRoot.style.left = '-99999px'
+    shadowRoot.style.top = '0'
+    shadowRoot.style.pointerEvents = 'none'
+    shadowRoot.style.opacity = '0'
+    document.body.append(shadowRoot)
+
+    const draw = new Draw(
+      shadowRoot,
+      snapshot.options as any,
+      {
+        header: snapshot.data.header || [],
+        main: snapshot.data.main,
+        footer: snapshot.data.footer || [],
+        graffiti: snapshot.data.graffiti || []
+      },
+      new Listener(),
+      new EventBus<any>(),
+      new Override()
+    )
+
+    try {
+      return {
+        rowList: draw.getRowList().map(row => ({
+          rowIndex: row.rowIndex,
+          height: row.height,
+          ascent: row.ascent,
+          text: row.elementList.map(element => element.value || '').join('')
+        })),
+        positionList: draw.getPosition().getOriginalMainPositionList().map(
+          position => ({
+            value: position.value,
+            index: position.index,
+            pageNo: position.pageNo,
+            rowIndex: position.rowIndex,
+            rowNo: position.rowNo,
+            ascent: position.ascent,
+            lineHeight: position.lineHeight,
+            leftTop: position.coordinate.leftTop,
+            leftBottom: position.coordinate.leftBottom,
+            rightTop: position.coordinate.rightTop,
+            rightBottom: position.coordinate.rightBottom
+          })
+        )
+      }
+    } finally {
+      draw.destroy()
+      shadowRoot.remove()
+    }
+  }
   if (import.meta.env.DEV) {
     Reflect.set(window, '__editorInstance', instance)
     Reflect.set(window, '__exportPdfBase64', exportPdfBase64)
     Reflect.set(window, '__exportPdfDiagnostics', () =>
-      (instance.command as CommandWithJspdf).executeExportPdfDiagnostics()
+      (instance.command as CommandWithJspdf).executeExportPdfDiagnostics(
+        defaultPdfExportOption
+      )
     )
     Reflect.set(window, '__exportPdf', exportPdf)
     Reflect.set(window, '__captureEditorPages', captureEditorPages)
@@ -439,6 +499,7 @@ window.onload = async function () {
     Reflect.set(window, '__debugPdfTextMetrics', debugPdfTextMetrics)
     Reflect.set(window, '__debugCorePrintRows', debugCorePrintRows)
     Reflect.set(window, '__debugCoreHeaderLayout', debugCoreHeaderLayout)
+    Reflect.set(window, '__debugCoreMainLayout', debugCoreMainLayout)
     Reflect.set(window, '__jspdfDebug', {
       fontUrls: {
         SimSun: simsunTtfUrl

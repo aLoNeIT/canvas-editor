@@ -18,6 +18,7 @@ export interface IJspdfPluginOption {
   fonts?: Record<string, string>
   defaultFontFamily?: string
   debug?: boolean
+  disableTextRasterFallback?: boolean
 }
 
 export interface IJspdfExportOption extends IJspdfPluginOption {
@@ -33,6 +34,17 @@ export type CommandWithJspdf = Command & {
   ): Promise<ReturnType<typeof collectDiagnostics>>
 }
 
+function resolveDefaultExportOption(
+  options: IJspdfPluginOption,
+  payload?: IJspdfExportOption
+): IJspdfExportOption {
+  return {
+    disableTextRasterFallback: true,
+    ...options,
+    ...payload
+  }
+}
+
 export function jspdfPlugin(editor: Editor, options: IJspdfPluginOption = {}) {
   const command = editor.command as CommandWithJspdf
   installBadgeStateTracking(editor)
@@ -43,8 +55,7 @@ export function jspdfPlugin(editor: Editor, options: IJspdfPluginOption = {}) {
       payload || {}
     )
     const finalOption: IJspdfExportOption = {
-      ...options,
-      ...payload,
+      ...resolveDefaultExportOption(options, payload),
       mode: payload?.mode || EditorMode.PRINT,
       __printPageDataUrlList: printPageDataUrlList
     }
@@ -60,8 +71,7 @@ export function jspdfPlugin(editor: Editor, options: IJspdfPluginOption = {}) {
       payload || {}
     )
     const finalOption: IJspdfExportOption = {
-      ...options,
-      ...payload,
+      ...resolveDefaultExportOption(options, payload),
       mode: payload?.mode || EditorMode.PRINT,
       __printPageDataUrlList: printPageDataUrlList
     }

@@ -166,6 +166,7 @@ export interface IDocumentModel {
   margins: number[]
   scale: number
   printPageDataUrlList?: string[]
+  disableTextRasterFallback?: boolean
   defaults: IDocumentLayoutDefaults
   badge?: IDocumentBadgeState
   header: IZoneModel

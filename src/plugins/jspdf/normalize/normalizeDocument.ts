@@ -431,6 +431,8 @@ export function normalizeDocument(source: IJspdfSourceState): IDocumentModel {
     margins: [...source.options.margins],
     scale: source.options.scale,
     printPageDataUrlList: source.exportOptions.__printPageDataUrlList,
+    disableTextRasterFallback:
+      source.exportOptions.disableTextRasterFallback,
     badge: {
       top: source.options.badge.top,
       left: source.options.badge.left,

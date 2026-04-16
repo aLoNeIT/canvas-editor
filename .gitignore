@@ -9,3 +9,5 @@ cache
 .temp
 .tmp-jspdf-runtime-test
 .*
+cypress
+tmp*

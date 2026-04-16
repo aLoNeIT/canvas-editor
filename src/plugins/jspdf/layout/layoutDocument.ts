@@ -1341,6 +1341,10 @@ async function appendPlacementTextRasterFallback(
   stage: number,
   documentModel: IDocumentModel
 ) {
+  if (documentModel.disableTextRasterFallback) {
+    return false
+  }
+
   if (
     !shouldRasterizeDenseCjkTextLine(block, placementList, stage) &&
     !shouldRasterizeContentTextLine(block, placementList, stage)
@@ -1452,6 +1456,10 @@ async function appendStaticZoneTextRasterFallback(
   stage: number,
   documentModel: IDocumentModel
 ) {
+  if (documentModel.disableTextRasterFallback) {
+    return false
+  }
+
   if (!isStaticHeaderSmallCjkLine(placementList, stage)) {
     return false
   }
@@ -2016,13 +2024,24 @@ function getTableColumnCount(block: IDocumentBlockNode) {
   return Math.max(getTableColumnWidthList(block).length, 1)
 }
 
+function getTableLayoutWidth(block: IDocumentBlockNode, fallbackWidth: number) {
+  if (typeof block.element.width === 'number' && block.element.width > 0) {
+    return block.element.width
+  }
+
+  const columnWidth = getTableColumnWidthList(block)
+    .reduce((sum, currentWidth) => sum + currentWidth, 0)
+  return columnWidth || fallbackWidth
+}
+
 function getResolvedTableRowHeightList(
   block: IDocumentBlockNode,
   width: number,
   documentModel: IDocumentModel
 ) {
   const rowList = layoutTable(block)
-  const columnWidthList = getTableColumnWidthList(block, width)
+  const tableWidth = getTableLayoutWidth(block, width)
+  const columnWidthList = getTableColumnWidthList(block, tableWidth)
   return resolveTableRowHeightList({
     rowList,
     columnWidthList,
@@ -2332,11 +2351,12 @@ function appendTableRow(
   const row = rowList[rowIndex]
   if (!row) return
 
+  const tableWidth = getTableLayoutWidth(block, width)
   const columnCount = getTableColumnCount(block)
-  const columnWidthList = getTableColumnWidthList(block, width)
+  const columnWidthList = getTableColumnWidthList(block, tableWidth)
   const rowHeightList = getResolvedTableRowHeightList(
     block,
-    width,
+    tableWidth,
     documentModel
   )
   const rowCount = rowList.length
@@ -2452,10 +2472,11 @@ function getTableRowBaseline(
   const row = rowList[rowIndex]
   if (!row) return null
 
-  const columnWidthList = getTableColumnWidthList(block, width)
+  const tableWidth = getTableLayoutWidth(block, width)
+  const columnWidthList = getTableColumnWidthList(block, tableWidth)
   const rowHeightList = getResolvedTableRowHeightList(
     block,
-    width,
+    tableWidth,
     documentModel
   )
 
