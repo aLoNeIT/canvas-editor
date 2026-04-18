@@ -16,6 +16,20 @@
   "globals": {
     "process": true
   },
+  "overrides": [
+    {
+      "files": ["cypress/**/*.js", "cypress/**/*.ts"],
+      "env": {
+        "browser": true,
+        "mocha": true
+      },
+      "globals": {
+        "cy": "readonly",
+        "Cypress": "readonly",
+        "expect": "readonly"
+      }
+    }
+  ],
   "rules": {
     "linebreak-style": 0,
     "no-console": 0,
