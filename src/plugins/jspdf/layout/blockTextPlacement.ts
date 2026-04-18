@@ -19,6 +19,9 @@ export interface ICreateBlockTextPlacementsOption {
   fallbackBold?: boolean
   fallbackItalic?: boolean
   fallbackLineHeight?: number
+  fallbackRowMargin?: number
+  fallbackDefaultRowMargin?: number
+  fallbackDefaultBasicRowMarginHeight?: number
   fallbackTabWidth?: number
   fallbackControlPlaceholderColor?: string
   fallbackControlBracketColor?: string
@@ -53,6 +56,9 @@ export function createBlockTextPlacementResult(
     bold: option.fallbackBold,
     italic: option.fallbackItalic,
     lineHeight: option.fallbackLineHeight,
+    rowMargin: option.fallbackRowMargin,
+    defaultRowMargin: option.fallbackDefaultRowMargin,
+    defaultBasicRowMarginHeight: option.fallbackDefaultBasicRowMarginHeight,
     tabWidth: option.fallbackTabWidth,
     controlPlaceholderColor: option.fallbackControlPlaceholderColor,
     controlBracketColor: option.fallbackControlBracketColor,

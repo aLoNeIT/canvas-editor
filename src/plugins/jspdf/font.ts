@@ -1,10 +1,13 @@
 import type jsPDF from 'jspdf'
 import { SONG_TTF_URL } from './assets/song'
-import { registerPdfFontStyles } from './fontRegistration'
+import {
+  registerPdfFontStyles,
+  type TPdfFontFileMap
+} from './fontRegistration'
 import { resolvePdfFontFamily } from './render/fontFamily'
 
 export interface IFontBootstrapOption {
-  fonts?: Record<string, string>
+  fonts?: Record<string, TPdfFontFileMap>
   defaultFontFamily?: string
   debug?: boolean
 }
@@ -89,18 +92,53 @@ async function registerSongFallback(doc: jsPDF, debug?: boolean) {
 async function registerFontFromUrl(
   doc: jsPDF,
   fontFamily: string,
-  url: string,
+  fontFileMap: TPdfFontFileMap,
   debug?: boolean
 ) {
   try {
-    const base64 = await loadUrlAsBase64(url)
-    const filename = toVfsFilename(fontFamily)
-    if (!doc.existsFileInVFS(filename)) {
-      doc.addFileToVFS(filename, base64)
+    const fileMap =
+      typeof fontFileMap === 'string'
+        ? {
+            normal: fontFileMap
+          }
+        : fontFileMap
+
+    const resolvedFilenameByStyle: Partial<Record<string, string>> = {}
+
+    for (const [style, url] of Object.entries(fileMap)) {
+      if (!url) continue
+      const filename =
+        style === 'normal'
+          ? toVfsFilename(fontFamily)
+          : toVfsFilename(`${fontFamily}-${style}`)
+      if (!doc.existsFileInVFS(filename)) {
+        // eslint-disable-next-line no-await-in-loop
+        const base64 = await loadUrlAsBase64(url)
+        doc.addFileToVFS(filename, base64)
+      }
+      resolvedFilenameByStyle[style] = filename
     }
-    registerPdfFontStyles(doc, filename, fontFamily)
+
+    registerPdfFontStyles(doc, resolvedFilenameByStyle, fontFamily)
   } catch (e) {
     warn(debug, `Failed to register font '${fontFamily}' from URL`, e)
+  }
+}
+
+function resolveSimHeiAliasSource(
+  fonts: Record<string, TPdfFontFileMap>
+): TPdfFontFileMap | null {
+  if (fonts.SimHei) {
+    return fonts.SimHei
+  }
+
+  const simSun = fonts.SimSun
+  if (!simSun || typeof simSun === 'string' || !simSun.bold) {
+    return null
+  }
+
+  return {
+    normal: simSun.bold
   }
 }
 
@@ -115,6 +153,11 @@ export async function bootstrapPdfFonts(
     if (!fontFamily || !url) continue
     // eslint-disable-next-line no-await-in-loop
     await registerFontFromUrl(doc, fontFamily, url, options.debug)
+  }
+
+  const simHeiAliasSource = resolveSimHeiAliasSource(fonts)
+  if (simHeiAliasSource) {
+    await registerFontFromUrl(doc, 'SimHei', simHeiAliasSource, options.debug)
   }
 
   const defaultFontFamily = options.defaultFontFamily || 'Song'

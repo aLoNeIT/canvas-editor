@@ -138,6 +138,15 @@ function isSurroundImageBlock(block: IDocumentBlockNode) {
   )
 }
 
+function isControlBlock(block: IDocumentBlockNode) {
+  return (
+    block.kind === 'control' ||
+    block.element.type === ElementType.CONTROL ||
+    block.element.type === ElementType.CHECKBOX ||
+    block.element.type === ElementType.RADIO
+  )
+}
+
 function createPage(pageNo: number, documentModel: IDocumentModel): IPageModel {
   return {
     pageNo,
@@ -631,16 +640,40 @@ function collectAreaDecorationSegment(
   top: number,
   height = placement.height
 ) {
-  const areaId = placement.block.element.areaId
-  const area = placement.block.element.area
-  if (!areaId || !area || area.hide) {
+  const areaSource = (() => {
+    const areaId = placement.block.element.areaId
+    const area = placement.block.element.area
+    if (areaId && area && !area.hide) {
+      return {
+        areaId,
+        backgroundColor: area.backgroundColor,
+        borderColor: area.borderColor
+      }
+    }
+    if (placement.kind !== 'text-line') {
+      return null
+    }
+    const areaPlacement = placement.line.placementList.find(item =>
+      item.areaId &&
+      (item.areaBackgroundColor || item.areaBorderColor)
+    )
+    if (!areaPlacement?.areaId) {
+      return null
+    }
+    return {
+      areaId: areaPlacement.areaId,
+      backgroundColor: areaPlacement.areaBackgroundColor,
+      borderColor: areaPlacement.areaBorderColor
+    }
+  })()
+  if (!areaSource?.areaId) {
     return
   }
-  if (!area.backgroundColor && !area.borderColor) {
+  if (!areaSource.backgroundColor && !areaSource.borderColor) {
     return
   }
 
-  const segment = areaSegmentMap.get(areaId)
+  const segment = areaSegmentMap.get(areaSource.areaId)
   const bottom = top + height
   if (segment) {
     segment.top = Math.min(segment.top, top)
@@ -648,12 +681,12 @@ function collectAreaDecorationSegment(
     return
   }
 
-  areaSegmentMap.set(areaId, {
-    areaId,
+  areaSegmentMap.set(areaSource.areaId, {
+    areaId: areaSource.areaId,
     top,
     bottom,
-    backgroundColor: area.backgroundColor,
-    borderColor: area.borderColor
+    backgroundColor: areaSource.backgroundColor,
+    borderColor: areaSource.borderColor
   })
 }
 
@@ -955,6 +988,12 @@ function canMergePlacement(
     left.underline === right.underline &&
     left.strikeout === right.strikeout &&
     left.color === right.color &&
+    left.linkUrl === right.linkUrl &&
+    left.areaId === right.areaId &&
+    left.areaBackgroundColor === right.areaBackgroundColor &&
+    left.areaBorderColor === right.areaBorderColor &&
+    left.controlKey === right.controlKey &&
+    left.controlBorder === right.controlBorder &&
     left.baselineOffset === right.baselineOffset &&
     Math.abs(left.x + left.width - right.x) < 0.001
   )
@@ -1076,7 +1115,7 @@ function tryResolveSingleLineSurroundSplit(
   width: number,
   blockList: IDocumentBlockNode[]
 ): IResolvedSurroundTextLineFragment[] | null {
-  const lineTop = y + placement.textStyle.rowMargin
+  const lineTop = y + placement.line.rowMargin
   const lineBottom = lineTop + placement.line.height
   const surroundRectList = getActiveSurroundRectList(
     pageNo,
@@ -1167,7 +1206,7 @@ function tryResolveSingleLineSurroundSplit(
   const overflowFragmentList = createWrappedTextLineFragments(
     overflowPlacementList,
     x + lineStartOffset,
-    imageBottom - placement.textStyle.rowMargin,
+    imageBottom - placement.line.rowMargin,
     width,
     placement.line.height
   )
@@ -1563,7 +1602,9 @@ async function appendResolvedTextLineFragments(
   page: IPageModel,
   block: IDocumentBlockNode,
   fragmentList: IResolvedSurroundTextLineFragment[],
+  originX: number,
   textStyle: IResolvedBlockTextStyle,
+  lineRowMargin: number,
   listSemantic: IListBlockSemantics,
   lineIndex: number,
   documentModel: IDocumentModel,
@@ -1577,23 +1618,22 @@ async function appendResolvedTextLineFragments(
   if (lineIndex === 0) {
     const markerPlacement = createListMarkerPlacement({
       semantic: listSemantic,
-      x: 0,
-      y: 0,
+      x: originX,
+      y: firstFragment.y + lineRowMargin,
       height: firstFragment.placementList[0]?.height || 0,
       baselineOffset:
         firstFragment.placementList[0]?.baselineOffset || textStyle.size
     })
+    if (markerPlacement) {
+      appendPlacementTextRuns(page, block, [markerPlacement], 0, 0, stage)
+    }
     for (let fragmentIndex = 0; fragmentIndex < fragmentList.length; fragmentIndex++) {
       const fragment = fragmentList[fragmentIndex]
-      const contentY = fragment.y + textStyle.rowMargin
-      const renderPlacementList = createMarkerAwarePlacementList(
-        fragment.placementList,
-        fragmentIndex === 0 ? markerPlacement : null
-      )
+      const contentY = fragment.y + lineRowMargin
       const fallbackApplied = await appendPlacementTextRasterFallback(
         page,
         block,
-        renderPlacementList,
+        fragment.placementList,
         fragment.x,
         contentY,
         stage,
@@ -1605,7 +1645,7 @@ async function appendResolvedTextLineFragments(
       appendPlacementTextRuns(
         page,
         block,
-        renderPlacementList,
+        fragment.placementList,
         fragment.x,
         contentY,
         stage
@@ -1615,7 +1655,7 @@ async function appendResolvedTextLineFragments(
   }
 
   for (const fragment of fragmentList) {
-    const contentY = fragment.y + textStyle.rowMargin
+    const contentY = fragment.y + lineRowMargin
     const fallbackApplied = await appendPlacementTextRasterFallback(
       page,
       block,
@@ -1666,7 +1706,7 @@ function resolveSurroundTextLinePlacement(
     }
   }
 
-  const rowMargin = placement.textStyle.rowMargin
+  const rowMargin = placement.line.rowMargin
   const contentRight = x + width
   let renderX = x
   let renderY = y
@@ -1806,7 +1846,7 @@ function measurePlacementConsumedHeight(
 
         return Math.max(
           maxBottom,
-          fragment.y + textPlacement.y + measured.descent
+          fragment.y + placement.line.rowMargin + textPlacement.y + measured.descent
         )
       },
       fragment.y
@@ -1874,44 +1914,64 @@ function paginateMainPlacements(
 }
 
 function collectControlBorderSegment(
-  controlBorderSegmentMap: Map<IDocumentBlockNode, IControlBorderSegment>,
+  controlBorderSegmentMap: Map<object, IControlBorderSegment>,
   placement: IMainPlacement,
   x: number,
   y: number
 ) {
   if (placement.kind !== 'text-line') return
-  if (placement.block.kind !== 'control') return
-  if (!placement.block.element.control?.border) return
   if (!placement.line.placementList.length) return
 
-  const left = x + Math.min(
-    ...placement.line.placementList.map(line => line.x)
-  )
-  const right = x + Math.max(
-    ...placement.line.placementList.map(line => line.x + line.width)
-  )
-  const segment = controlBorderSegmentMap.get(placement.block)
   const bottom = y + placement.height
+  const controlPlacementMap =
+    new Map<object, ITextLinePlacement['line']['placementList']>()
 
-  if (segment) {
-    segment.top = Math.min(segment.top, y)
-    segment.bottom = Math.max(segment.bottom, bottom)
-    segment.left = Math.min(segment.left, left)
-    segment.right = Math.max(segment.right, right)
-    return
+  placement.line.placementList.forEach(linePlacement => {
+    if (!linePlacement.controlKey || !linePlacement.controlBorder) {
+      return
+    }
+    const placementList = controlPlacementMap.get(linePlacement.controlKey)
+    if (placementList) {
+      placementList.push(linePlacement)
+      return
+    }
+    controlPlacementMap.set(linePlacement.controlKey, [linePlacement])
+  })
+
+  if (!controlPlacementMap.size) {
+    if (!isControlBlock(placement.block) || !placement.block.element.control?.border) {
+      return
+    }
+    controlPlacementMap.set(placement.block.element, placement.line.placementList)
   }
 
-  controlBorderSegmentMap.set(placement.block, {
-    top: y,
-    bottom,
-    left,
-    right
+  controlPlacementMap.forEach((placementList, controlKey) => {
+    const left = x + Math.min(...placementList.map(line => line.x))
+    const right = x + Math.max(
+      ...placementList.map(line => line.x + line.width)
+    )
+    const segment = controlBorderSegmentMap.get(controlKey)
+
+    if (segment) {
+      segment.top = Math.min(segment.top, y)
+      segment.bottom = Math.max(segment.bottom, bottom)
+      segment.left = Math.min(segment.left, left)
+      segment.right = Math.max(segment.right, right)
+      return
+    }
+
+    controlBorderSegmentMap.set(controlKey, {
+      top: y,
+      bottom,
+      left,
+      right
+    })
   })
 }
 
 function appendControlBorders(
   page: IPageModel,
-  controlBorderSegmentMap: Map<IDocumentBlockNode, IControlBorderSegment>,
+  controlBorderSegmentMap: Map<object, IControlBorderSegment>,
   documentModel: IDocumentModel,
   stage: number = PDF_RENDER_STAGE.CONTENT
 ) {
@@ -1986,6 +2046,10 @@ function createResolvedTextLayout(
     fallbackBold: textStyle.bold,
     fallbackItalic: textStyle.italic,
     fallbackLineHeight: textStyle.lineHeight,
+    fallbackRowMargin: textStyle.rowMargin,
+    fallbackDefaultRowMargin: documentModel.defaults.defaultRowMargin,
+    fallbackDefaultBasicRowMarginHeight:
+      documentModel.defaults.defaultBasicRowMarginHeight,
     fallbackTabWidth:
       documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH,
     fallbackControlPlaceholderColor:
@@ -2007,10 +2071,10 @@ function createResolvedTextLayout(
   }))
   const height = lineList.length
     ? lineList.reduce(
-        (sum, line) => sum + line.height + textStyle.rowMargin * 2,
+        (sum, line) => sum + line.height + line.rowMargin * 2,
         0
       )
-    : textStyle.lineHeight + textStyle.rowMargin * 2
+    : 0
 
   return {
     lineList,
@@ -2056,6 +2120,9 @@ function getResolvedTableRowHeightList(
     lineHeight: getTextLineHeight(documentModel.defaults.defaultFont, 12),
     font: documentModel.defaults.defaultFont,
     size: 12,
+    defaultRowMargin: documentModel.defaults.defaultRowMargin,
+    defaultBasicRowMarginHeight:
+      documentModel.defaults.defaultBasicRowMarginHeight,
     tabWidth: documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH
   })
 }
@@ -2117,6 +2184,10 @@ function getBlockLayoutHeight(
     fallbackBold: textStyle.bold,
     fallbackItalic: textStyle.italic,
     fallbackLineHeight: textStyle.lineHeight,
+    fallbackRowMargin: textStyle.rowMargin,
+    fallbackDefaultRowMargin: documentModel.defaults.defaultRowMargin,
+    fallbackDefaultBasicRowMarginHeight:
+      documentModel.defaults.defaultBasicRowMarginHeight,
     fallbackTabWidth:
       documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH,
     fallbackControlPlaceholderColor:
@@ -2128,14 +2199,14 @@ function getBlockLayoutHeight(
     fallbackRadioGap: documentModel.defaults.radio?.gap || 5,
     measureWidth: createMeasureWidth(textStyle.font, textStyle.size)
   }).lineList
+  const contentHeight = lineList.reduce(
+    (sum, line) => sum + line.height + line.rowMargin * 2,
+    0
+  )
   return Math.max(
     block.height || 0,
     getBlockHeight(block),
-    lineList.reduce(
-      (sum, line) => sum + line.height + textStyle.rowMargin * 2,
-      0
-    ) ||
-      textStyle.lineHeight + textStyle.rowMargin * 2
+    contentHeight
   )
 }
 
@@ -2159,8 +2230,9 @@ function collectMainPlacements(
     }
 
     if (
-      block.element.type === ElementType.LABEL ||
-      block.element.type === ElementType.SEPARATOR
+      ((block.element.type === ElementType.LABEL &&
+        block.kind !== 'paragraph') ||
+        block.element.type === ElementType.SEPARATOR)
     ) {
       placementList.push({
         kind: 'block',
@@ -2198,7 +2270,7 @@ function collectMainPlacements(
           block,
           line,
           lineIndex,
-          height: line.height + resolved.textStyle.rowMargin * 2,
+          height: line.height + line.rowMargin * 2,
           textStyle: resolved.textStyle,
           listSemantic: resolved.listSemantic
         })
@@ -2262,21 +2334,51 @@ function appendPlacementTextRuns(
 ) {
   if (!placementList.length) return
 
-  createTextDecorationLines(placementList).forEach(line => {
+  const absolutePlacementList = placementList.map(placement => ({
+    ...placement,
+    x: x + placement.x,
+    y: y + placement.y
+  }))
+
+  createTextDecorationLines(absolutePlacementList).forEach(line => {
     page.vectorLines.push({
       pageNo: page.pageNo,
       stage,
-      x1: x + line.x1,
-      y1: y + line.y1,
-      x2: x + line.x2,
-      y2: y + line.y2,
-      color: line.color,
-      width: line.width,
-      dash: line.dash
+      ...line
     })
   })
 
+  const appendInlineImagePlacement = (
+    placement: IStyledTextPlacementLine['placementList'][number]
+  ) => {
+    if (
+      !placement.inlineImageDataUrl ||
+      !placement.inlineImageWidth ||
+      !placement.inlineImageHeight
+    ) {
+      return false
+    }
+
+    page.rasterBlocks.push({
+      pageNo: page.pageNo,
+      stage,
+      x: x + placement.x,
+      y: y + placement.y - placement.inlineImageHeight,
+      width: placement.inlineImageWidth,
+      height: placement.inlineImageHeight,
+      dataUrl: placement.inlineImageDataUrl,
+      crop: placement.inlineImageCrop,
+      sourceType: 'image',
+      layer: 'content'
+    })
+    return true
+  }
+
   placementList.forEach(line => {
+    if (appendInlineImagePlacement(line)) {
+      return
+    }
+
     const measured = layoutInline(
       {
         kind: 'text',
@@ -2308,19 +2410,40 @@ function appendPlacementTextRuns(
       color: line.color
     })
 
-    if (block.element.highlight) {
+    const highlightColor = line.highlight || block.element.highlight
+    if (highlightColor) {
+      const rowMargin = line.rowMargin || 0
+      const highlightTop =
+        y + line.y - line.baselineOffset - rowMargin
+      const highlightHeight = line.height + rowMargin * 2
       page.highlightRects.push({
         pageNo: page.pageNo,
         stage,
         x: x + line.x,
-        y: y + line.y - measured.ascent,
+        y: highlightTop,
         width: line.widthOverride ?? Math.min(measured.width, line.width),
-        height: measured.ascent + measured.descent,
-        color: block.element.highlight,
-        opacity: 0.35
+        height: highlightHeight,
+        color: highlightColor,
+        opacity: 0.6
       })
     }
   })
+
+  const linkPlacementList = placementList.filter(line => line.linkUrl)
+  if (linkPlacementList.length) {
+    linkPlacementList.forEach(line => {
+      page.links.push({
+        pageNo: page.pageNo,
+        stage,
+        x: x + line.x,
+        y: y + line.y - line.baselineOffset,
+        width: line.width,
+        height: line.height,
+        url: line.linkUrl!
+      })
+    })
+    return
+  }
 
   if (block.element.type === 'hyperlink' && block.element.url) {
     placementList.forEach(line => {
@@ -2420,6 +2543,9 @@ function appendTableRow(
       rowHeight: cellHeight,
       font: documentModel.defaults.defaultFont,
       size: 12,
+      defaultRowMargin: documentModel.defaults.defaultRowMargin,
+      defaultBasicRowMarginHeight:
+        documentModel.defaults.defaultBasicRowMarginHeight,
       lineHeight: getTextLineHeight(documentModel.defaults.defaultFont, 12),
       tabWidth: documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH,
       color: '#000000',
@@ -2442,6 +2568,26 @@ function appendTableRow(
     })
 
     cellLineList.forEach(line => {
+      if (
+        line.inlineImageDataUrl &&
+        line.inlineImageWidth &&
+        line.inlineImageHeight
+      ) {
+        page.rasterBlocks.push({
+          pageNo: page.pageNo,
+          stage,
+          x: line.x,
+          y: line.y - line.inlineImageHeight,
+          width: line.inlineImageWidth,
+          height: line.inlineImageHeight,
+          dataUrl: line.inlineImageDataUrl,
+          crop: line.inlineImageCrop,
+          sourceType: 'image',
+          layer: 'content'
+        })
+        return
+      }
+
       page.textRuns.push({
         pageNo: page.pageNo,
         stage,
@@ -2456,6 +2602,22 @@ function appendTableRow(
         italic: line.italic,
         color: line.color
       })
+
+      if (line.highlight) {
+        const rowMargin = line.rowMargin || 0
+        const highlightTop = line.y - line.baselineOffset - rowMargin
+        const highlightHeight = line.height + rowMargin * 2
+        page.highlightRects.push({
+          pageNo: page.pageNo,
+          stage,
+          x: line.x,
+          y: highlightTop,
+          width: line.width,
+          height: highlightHeight,
+          color: line.highlight,
+          opacity: 0.6
+        })
+      }
     })
   })
 }
@@ -2504,6 +2666,9 @@ function getTableRowBaseline(
       rowHeight: cellHeight,
       font: documentModel.defaults.defaultFont,
       size: 12,
+      defaultRowMargin: documentModel.defaults.defaultRowMargin,
+      defaultBasicRowMarginHeight:
+        documentModel.defaults.defaultBasicRowMarginHeight,
       lineHeight: getTextLineHeight(documentModel.defaults.defaultFont, 12),
       tabWidth: documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH,
       color: '#000000',
@@ -2531,7 +2696,7 @@ function resolveMainPlacementLineNumberBaseline(
   documentModel: IDocumentModel
 ) {
   if (placement.kind === 'text-line') {
-    return y + placement.textStyle.rowMargin + placement.line.baselineOffset
+    return y + placement.line.rowMargin + placement.line.baselineOffset
   }
 
   if (placement.kind === 'table-row') {
@@ -2687,7 +2852,9 @@ async function appendPlacement(
       page,
       placement.block,
       surroundPlacement.fragmentList,
+      x,
       placement.textStyle,
+      placement.line.rowMargin,
       placement.listSemantic,
       placement.lineIndex,
       documentModel
@@ -2798,7 +2965,7 @@ async function appendPlacement(
     }
   }
 
-  if (placement.block.kind === 'control') {
+  if (isControlBlock(placement.block)) {
     return {
       renderX: x,
       renderY: y,
@@ -2829,7 +2996,7 @@ async function appendStaticZone(
       ? PDF_RENDER_STAGE.HEADER
       : PDF_RENDER_STAGE.FOOTER
   const listSemanticMap = createZoneListSemanticMap(blockList, documentModel)
-  const controlBorderSegmentMap = new Map<IDocumentBlockNode, IControlBorderSegment>()
+  const controlBorderSegmentMap = new Map<object, IControlBorderSegment>()
   let cursorY = startY
   for (const block of blockList) {
     if (block.kind === 'paragraph' || block.kind === 'control') {
@@ -2890,7 +3057,7 @@ async function appendStaticZone(
       )
       for (let lineIndex = 0; lineIndex < resolved.lineList.length; lineIndex++) {
         const line = resolved.lineList[lineIndex]
-        const lineY = cursorY + resolved.textStyle.rowMargin
+        const lineY = cursorY + line.rowMargin
         const markerPlacement = lineIndex === 0
           ? createListMarkerPlacement({
               semantic: resolved.listSemantic,
@@ -2925,28 +3092,21 @@ async function appendStaticZone(
           )
         }
 
-        if (block.kind === 'control' && block.element.control?.border) {
-          const left = x + Math.min(...line.placementList.map(item => item.x))
-          const right = x + Math.max(
-            ...line.placementList.map(item => item.x + item.width)
-          )
-          const segment = controlBorderSegmentMap.get(block)
-          const bottom = cursorY + line.height + resolved.textStyle.rowMargin * 2
-          if (segment) {
-            segment.top = Math.min(segment.top, cursorY)
-            segment.bottom = Math.max(segment.bottom, bottom)
-            segment.left = Math.min(segment.left, left)
-            segment.right = Math.max(segment.right, right)
-          } else if (line.placementList.length) {
-            controlBorderSegmentMap.set(block, {
-              top: cursorY,
-              bottom,
-              left,
-              right
-            })
-          }
-        }
-        cursorY += line.height + resolved.textStyle.rowMargin * 2
+        collectControlBorderSegment(
+          controlBorderSegmentMap,
+          {
+            kind: 'text-line',
+            block,
+            line,
+            lineIndex,
+            height: line.height + line.rowMargin * 2,
+            textStyle: resolved.textStyle,
+            listSemantic: resolved.listSemantic
+          },
+          x,
+          cursorY
+        )
+        cursorY += line.height + line.rowMargin * 2
       }
       if (!resolved.lineList.length) {
         cursorY += resolved.height
@@ -3073,7 +3233,7 @@ function measureStaticZoneHeight(
       )
       totalHeight += resolved.lineList.length
         ? resolved.lineList.reduce(
-            (sum, line) => sum + line.height + resolved.textStyle.rowMargin * 2,
+            (sum, line) => sum + line.height + line.rowMargin * 2,
             0
           )
         : resolved.height
@@ -3105,6 +3265,8 @@ function measureStaticZoneHeight(
 function resolveDocumentZoneHeights(documentModel: IDocumentModel) {
   const contentWidth =
     documentModel.width - documentModel.margins[1] - documentModel.margins[3]
+  const headerDisabled = documentModel.defaults.header?.disabled ?? false
+  const footerDisabled = documentModel.defaults.footer?.disabled ?? false
 
   return {
     contentWidth,
@@ -3112,7 +3274,7 @@ function resolveDocumentZoneHeights(documentModel: IDocumentModel) {
       ...documentModel,
       header: {
         ...documentModel.header,
-        height: documentModel.defaults.header.disabled
+        height: headerDisabled
           ? 0
           : measureStaticZoneHeight(
               documentModel,
@@ -3122,7 +3284,7 @@ function resolveDocumentZoneHeights(documentModel: IDocumentModel) {
       },
       footer: {
         ...documentModel.footer,
-        height: documentModel.defaults.footer.disabled
+        height: footerDisabled
           ? 0
           : measureStaticZoneHeight(
               documentModel,
@@ -3140,6 +3302,10 @@ export async function layoutDocument(
   const resolved = resolveDocumentZoneHeights(documentModel)
   const contentWidth = resolved.contentWidth
   const resolvedDocumentModel = resolved.documentModel
+  const headerDisabled = resolvedDocumentModel.defaults.header?.disabled ?? false
+  const footerDisabled = resolvedDocumentModel.defaults.footer?.disabled ?? false
+  const lineNumberDisabled =
+    resolvedDocumentModel.defaults.lineNumber?.disabled ?? true
   const frame = layoutFrame(resolvedDocumentModel)
   const mainPageHeight = Math.max(1, frame.mainBottom - frame.mainTop)
   const placements = collectMainPlacements(
@@ -3185,7 +3351,7 @@ export async function layoutDocument(
       frame,
       backgroundImageSize
     )
-    if (!resolvedDocumentModel.defaults.header.disabled) {
+    if (!headerDisabled) {
       await appendStaticZone(
         page,
         resolvedDocumentModel,
@@ -3197,7 +3363,7 @@ export async function layoutDocument(
         imageNumberMap
       )
     }
-    if (!resolvedDocumentModel.defaults.footer.disabled) {
+    if (!footerDisabled) {
       await appendStaticZone(
         page,
         resolvedDocumentModel,
@@ -3213,7 +3379,7 @@ export async function layoutDocument(
     let cursorY = frame.mainTop
     const lineNumberBaselineList: number[] = []
     const areaSegmentMap = new Map<string, IAreaDecorationSegment>()
-    const controlBorderSegmentMap = new Map<IDocumentBlockNode, IControlBorderSegment>()
+    const controlBorderSegmentMap = new Map<object, IControlBorderSegment>()
     const indexes = placementIndexes[pageNo] || []
     for (const index of indexes) {
       const placement = placements[index]
@@ -3260,7 +3426,7 @@ export async function layoutDocument(
       contentWidth
     )
     appendControlBorders(page, controlBorderSegmentMap, resolvedDocumentModel)
-    if (!resolvedDocumentModel.defaults.header.disabled) {
+    if (!headerDisabled) {
       appendFloatingImages(
         page,
         resolvedDocumentModel.header.blockList,
@@ -3276,7 +3442,7 @@ export async function layoutDocument(
       imageNumberMap,
       'main'
     )
-    if (!resolvedDocumentModel.defaults.footer.disabled) {
+    if (!footerDisabled) {
       appendFloatingImages(
         page,
         resolvedDocumentModel.footer.blockList,
@@ -3289,7 +3455,7 @@ export async function layoutDocument(
     appendGraffiti(page, resolvedDocumentModel)
 
     if (
-      !resolvedDocumentModel.defaults.lineNumber.disabled &&
+      !lineNumberDisabled &&
       lineNumberBaselineList.length
     ) {
       createLineNumberPlacements({

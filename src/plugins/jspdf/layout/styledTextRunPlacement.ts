@@ -7,6 +7,7 @@ export interface IStyledTextRun {
   size: number
   ascent?: number
   descent?: number
+  rowMargin?: number
   widthOverride?: number
   baselineShift?: number
   letterSpacing?: number
@@ -15,6 +16,17 @@ export interface IStyledTextRun {
   underline?: boolean
   strikeout?: boolean
   color?: string
+  highlight?: string
+  linkUrl?: string
+  areaId?: string
+  areaBackgroundColor?: string
+  areaBorderColor?: string
+  controlKey?: object
+  controlBorder?: boolean
+  inlineImageDataUrl?: string
+  inlineImageWidth?: number
+  inlineImageHeight?: number
+  inlineImageCrop?: ITextPlacement['inlineImageCrop']
   lineHeight: number
 }
 
@@ -49,6 +61,7 @@ interface IPlacementSegment extends Omit<IStyledTextRun, 'text' | 'lineHeight'> 
 interface IPlacementLine {
   height: number
   baseline: number
+  rowMargin: number
   justify?: boolean
   segmentList: IPlacementSegment[]
 }
@@ -57,6 +70,7 @@ export interface IStyledTextPlacementLine {
   y: number
   height: number
   baselineOffset: number
+  rowMargin: number
   placementList: ITextPlacement[]
 }
 
@@ -74,7 +88,18 @@ function isSameStyle(
     left.italic === right.italic &&
     left.underline === right.underline &&
     left.strikeout === right.strikeout &&
-    left.color === right.color
+    left.color === right.color &&
+    left.highlight === right.highlight &&
+    left.linkUrl === right.linkUrl &&
+    left.areaId === right.areaId &&
+    left.areaBackgroundColor === right.areaBackgroundColor &&
+    left.areaBorderColor === right.areaBorderColor &&
+    left.controlKey === right.controlKey &&
+    left.controlBorder === right.controlBorder &&
+    left.inlineImageDataUrl === right.inlineImageDataUrl &&
+    left.inlineImageWidth === right.inlineImageWidth &&
+    left.inlineImageHeight === right.inlineImageHeight &&
+    left.inlineImageCrop === right.inlineImageCrop
   )
 }
 
@@ -103,6 +128,7 @@ function createLine() {
   const line: IPlacementLine = {
     height: 0,
     baseline: 0,
+    rowMargin: 0,
     segmentList: []
   }
   return line
@@ -165,14 +191,29 @@ function flushLine(
       width: 0,
       font: fallbackRun.font,
       size: fallbackRun.size,
+      ascent: fallbackRun.ascent,
+      descent: fallbackRun.descent,
+      rowMargin: fallbackRun.rowMargin,
       bold: fallbackRun.bold,
       italic: fallbackRun.italic,
       underline: fallbackRun.underline,
       strikeout: fallbackRun.strikeout,
-      color: fallbackRun.color
+      color: fallbackRun.color,
+      highlight: fallbackRun.highlight,
+      linkUrl: fallbackRun.linkUrl,
+      areaId: fallbackRun.areaId,
+      areaBackgroundColor: fallbackRun.areaBackgroundColor,
+      areaBorderColor: fallbackRun.areaBorderColor,
+      controlKey: fallbackRun.controlKey,
+      controlBorder: fallbackRun.controlBorder,
+      inlineImageDataUrl: fallbackRun.inlineImageDataUrl,
+      inlineImageWidth: fallbackRun.inlineImageWidth,
+      inlineImageHeight: fallbackRun.inlineImageHeight,
+      inlineImageCrop: fallbackRun.inlineImageCrop
     })
-      currentLine.height = fallbackRun.lineHeight
-      currentLine.baseline = resolveRunBaseline(fallbackRun)
+    currentLine.height = fallbackRun.lineHeight
+    currentLine.baseline = resolveRunBaseline(fallbackRun)
+    currentLine.rowMargin = fallbackRun.rowMargin || 0
   }
 
   if (currentLine.segmentList.length) {
@@ -240,6 +281,9 @@ export function createStyledTextRunPlacements(
         {
           font: run.font,
           size: run.size,
+          ascent: run.ascent,
+          descent: run.descent,
+          rowMargin: run.rowMargin,
           widthOverride: run.widthOverride,
           baselineShift: run.baselineShift,
           letterSpacing: run.letterSpacing,
@@ -247,7 +291,18 @@ export function createStyledTextRunPlacements(
           italic: run.italic,
           underline: run.underline,
           strikeout: run.strikeout,
-          color: run.color
+          color: run.color,
+          highlight: run.highlight,
+          linkUrl: run.linkUrl,
+          areaId: run.areaId,
+          areaBackgroundColor: run.areaBackgroundColor,
+          areaBorderColor: run.areaBorderColor,
+          controlKey: run.controlKey,
+          controlBorder: run.controlBorder,
+          inlineImageDataUrl: run.inlineImageDataUrl,
+          inlineImageWidth: run.inlineImageWidth,
+          inlineImageHeight: run.inlineImageHeight,
+          inlineImageCrop: run.inlineImageCrop
         },
         char,
         resolvedCharWidth,
@@ -258,6 +313,10 @@ export function createStyledTextRunPlacements(
       currentLine.baseline = Math.max(
         currentLine.baseline,
         resolveRunBaseline(run)
+      )
+      currentLine.rowMargin = Math.max(
+        currentLine.rowMargin,
+        run.rowMargin || 0
       )
     }
   })
@@ -288,14 +347,28 @@ export function createStyledTextRunPlacements(
         height: line.height,
         font: segment.font,
         size: segment.size,
+        ascent: segment.ascent,
+        descent: segment.descent,
         widthOverride: segment.widthOverride,
         baselineShift: segment.baselineShift,
+        rowMargin: line.rowMargin,
         letterSpacing: segment.letterSpacing,
         bold: segment.bold,
         italic: segment.italic,
         underline: segment.underline,
         strikeout: segment.strikeout,
         color: segment.color,
+        highlight: segment.highlight,
+        linkUrl: segment.linkUrl,
+        areaId: segment.areaId,
+        areaBackgroundColor: segment.areaBackgroundColor,
+        areaBorderColor: segment.areaBorderColor,
+        controlKey: segment.controlKey,
+        controlBorder: segment.controlBorder,
+        inlineImageDataUrl: segment.inlineImageDataUrl,
+        inlineImageWidth: segment.inlineImageWidth,
+        inlineImageHeight: segment.inlineImageHeight,
+        inlineImageCrop: segment.inlineImageCrop,
         baselineOffset: line.baseline
       }
       placementList.push(placement)
@@ -306,6 +379,7 @@ export function createStyledTextRunPlacements(
       y: cursorY,
       height: line.height,
       baselineOffset: line.baseline,
+      rowMargin: line.rowMargin,
       placementList: linePlacementList
     })
     cursorY += line.height

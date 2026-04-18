@@ -11,6 +11,9 @@ export interface ICreateTableCellTextPlacementsOption {
   rowHeight: number
   font?: string
   size?: number
+  rowMargin?: number
+  defaultRowMargin?: number
+  defaultBasicRowMarginHeight?: number
   lineHeight?: number
   tabWidth?: number
   color?: string
@@ -48,6 +51,9 @@ export function createTableCellTextPlacements(
   const runList = extractTableCellTextRuns(option.td, {
     font: option.font,
     size: option.size,
+    rowMargin: option.rowMargin,
+    defaultRowMargin: option.defaultRowMargin,
+    defaultBasicRowMarginHeight: option.defaultBasicRowMarginHeight,
     color: option.color,
     bold: option.bold,
     italic: option.italic,
@@ -56,13 +62,19 @@ export function createTableCellTextPlacements(
   })
   if (!runList.length) return []
 
-  const { placementList, contentHeight } = createStyledTextRunPlacements({
+  const { lineList } = createStyledTextRunPlacements({
     runList,
     x: option.x + 6,
     y: option.y,
     width: Math.max(0, option.cellWidth - 12),
     measureWidth: option.measureWidth
   })
+  if (!lineList.length) return []
+
+  const contentHeight = lineList.reduce(
+    (sum, line) => sum + line.height + line.rowMargin * 2,
+    0
+  )
 
   const offsetY = resolveOffsetY(
     option.td.verticalAlign,
@@ -70,8 +82,15 @@ export function createTableCellTextPlacements(
     contentHeight
   )
 
-  return placementList.map(placement => ({
-    ...placement,
-    y: placement.y + offsetY
-  }))
+  let cursorY = option.y + offsetY
+
+  return lineList.flatMap(line => {
+    const lineY = cursorY + line.rowMargin
+    const placementList = line.placementList.map(placement => ({
+      ...placement,
+      y: lineY + (placement.y - line.y)
+    }))
+    cursorY += line.height + line.rowMargin * 2
+    return placementList
+  })
 }

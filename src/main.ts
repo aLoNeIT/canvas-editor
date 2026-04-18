@@ -25,9 +25,11 @@ import Editor, {
 import { Dialog } from './components/dialog/Dialog'
 import { formatPrismToken } from './utils/prism'
 import { Signature } from './components/signature/Signature'
+import simheiTtfUrl from './assets/fonts/simhei.ttf'
 import simsunTtfUrl from './assets/fonts/simsun.ttf'
 import { jspdfPlugin, type CommandWithJspdf } from './plugins/jspdf'
 import { bootstrapPdfFonts } from './plugins/jspdf/font'
+import type { TPdfFontFileMap } from './plugins/jspdf/fontRegistration'
 import { measureText } from './plugins/jspdf/measure/textMeasure'
 import { readEditorState } from './plugins/jspdf/source/readEditorState'
 import { normalizeDocument } from './plugins/jspdf/normalize/normalizeDocument'
@@ -45,6 +47,8 @@ import { Draw } from './editor/core/draw/Draw'
 import { Listener } from './editor/core/listener/Listener'
 import { EventBus } from './editor/core/event/eventbus/EventBus'
 import { Override } from './editor/core/override/Override'
+import { formatElementList } from './editor/utils/element'
+import { deepClone } from './editor/utils'
 
 async function registerBrowserFont(fontFamily: string, url: string) {
   if (
@@ -69,6 +73,7 @@ async function registerBrowserFont(fontFamily: string, url: string) {
 window.onload = async function () {
   const isApple =
     typeof navigator !== 'undefined' && /Mac OS X/.test(navigator.userAgent)
+  await registerBrowserFont('SimHei', simheiTtfUrl)
   await registerBrowserFont('SimSun', simsunTtfUrl)
 
   // 1. 初始化编辑器
@@ -116,7 +121,10 @@ window.onload = async function () {
   )
   instance.use(jspdfPlugin, {
     fonts: {
-      SimSun: simsunTtfUrl
+      SimSun: {
+        normal: simsunTtfUrl,
+        bold: simheiTtfUrl
+      }
     },
     defaultFontFamily: 'SimSun'
   })
@@ -143,13 +151,13 @@ window.onload = async function () {
     const bytes = Uint8Array.from(pdfBinary, char => char.charCodeAt(0))
     const blob = new Blob([bytes], { type: 'application/pdf' })
     const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'canvas-editor-export.pdf'
-    document.body.append(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
+    const previewWindow = window.open(url, '_blank')
+
+    if (previewWindow) {
+      return
+    }
+
+    window.location.href = url
   }
   const captureEditorPages = async () => {
     const snapshot = instance.command.getValue()
@@ -264,20 +272,26 @@ window.onload = async function () {
     return {
       pageModels,
       fontUrls: {
-        SimSun: simsunTtfUrl
+        SimSun: {
+          normal: simsunTtfUrl,
+          bold: simheiTtfUrl
+        }
       },
       defaultFontFamily: 'SimSun',
       paperDirection: source.options.paperDirection
     }
   }
   const renderPdfFromPageModels = async (pageModels: any[], payload?: {
-    fontUrls?: Record<string, string>
+    fontUrls?: Record<string, TPdfFontFileMap>
     defaultFontFamily?: string
     paperDirection?: PaperDirection
   }) => {
     return renderPdfBase64(pageModels, {
       fonts: payload?.fontUrls || {
-        SimSun: simsunTtfUrl
+        SimSun: {
+          normal: simsunTtfUrl,
+          bold: simheiTtfUrl
+        }
       },
       defaultFontFamily: payload?.defaultFontFamily || 'SimSun',
       paperDirection: payload?.paperDirection
@@ -299,7 +313,10 @@ window.onload = async function () {
     })
     await bootstrapPdfFonts(doc, {
       fonts: {
-        SimSun: simsunTtfUrl
+        SimSun: {
+          normal: simsunTtfUrl,
+          bold: simheiTtfUrl
+        }
       },
       defaultFontFamily: 'SimSun'
     })
@@ -339,8 +356,24 @@ window.onload = async function () {
       }
     })
   }
-  const debugCorePrintRows = async () => {
-    const snapshot = instance.command.getValue()
+  const createCoreDebugSnapshot = () => {
+    const snapshot = deepClone(instance.command.getValue())
+    const pageComponentData = [
+      snapshot.data.header || [],
+      snapshot.data.main || [],
+      snapshot.data.footer || []
+    ]
+
+    pageComponentData.forEach(data => {
+      formatElementList(data, {
+        editorOptions: snapshot.options as any,
+        isForceCompensation: true
+      })
+    })
+
+    return snapshot
+  }
+  const createCoreDebugHost = () => {
     const shadowRoot = document.createElement('div')
     shadowRoot.style.position = 'fixed'
     shadowRoot.style.left = '-99999px'
@@ -348,10 +381,17 @@ window.onload = async function () {
     shadowRoot.style.pointerEvents = 'none'
     shadowRoot.style.opacity = '0'
     document.body.append(shadowRoot)
-
+    return shadowRoot
+  }
+  const createCoreDebugDraw = (mode?: EditorMode) => {
+    const snapshot = createCoreDebugSnapshot()
+    const shadowRoot = createCoreDebugHost()
     const draw = new Draw(
       shadowRoot,
-      snapshot.options as any,
+      {
+        ...(snapshot.options as any),
+        ...(mode ? { mode } : {})
+      },
       {
         header: snapshot.data.header || [],
         main: snapshot.data.main,
@@ -362,6 +402,14 @@ window.onload = async function () {
       new EventBus<any>(),
       new Override()
     )
+
+    return {
+      draw,
+      shadowRoot
+    }
+  }
+  const debugCorePrintRows = async () => {
+    const { draw, shadowRoot } = createCoreDebugDraw()
 
     try {
       return draw.getPageRowList().map((rowList, pageNo) => ({
@@ -383,28 +431,7 @@ window.onload = async function () {
     }
   }
   const debugCoreHeaderLayout = async () => {
-    const snapshot = instance.command.getValue()
-    const shadowRoot = document.createElement('div')
-    shadowRoot.style.position = 'fixed'
-    shadowRoot.style.left = '-99999px'
-    shadowRoot.style.top = '0'
-    shadowRoot.style.pointerEvents = 'none'
-    shadowRoot.style.opacity = '0'
-    document.body.append(shadowRoot)
-
-    const draw = new Draw(
-      shadowRoot,
-      snapshot.options as any,
-      {
-        header: snapshot.data.header || [],
-        main: snapshot.data.main,
-        footer: snapshot.data.footer || [],
-        graffiti: snapshot.data.graffiti || []
-      },
-      new Listener(),
-      new EventBus<any>(),
-      new Override()
-    )
+    const { draw, shadowRoot } = createCoreDebugDraw()
 
     try {
       draw.getZone().setZone(EditorZone.HEADER)
@@ -431,28 +458,7 @@ window.onload = async function () {
     }
   }
   const debugCoreMainLayout = async () => {
-    const snapshot = instance.command.getValue()
-    const shadowRoot = document.createElement('div')
-    shadowRoot.style.position = 'fixed'
-    shadowRoot.style.left = '-99999px'
-    shadowRoot.style.top = '0'
-    shadowRoot.style.pointerEvents = 'none'
-    shadowRoot.style.opacity = '0'
-    document.body.append(shadowRoot)
-
-    const draw = new Draw(
-      shadowRoot,
-      snapshot.options as any,
-      {
-        header: snapshot.data.header || [],
-        main: snapshot.data.main,
-        footer: snapshot.data.footer || [],
-        graffiti: snapshot.data.graffiti || []
-      },
-      new Listener(),
-      new EventBus<any>(),
-      new Override()
-    )
+    const { draw, shadowRoot } = createCoreDebugDraw()
 
     try {
       return {
@@ -483,6 +489,254 @@ window.onload = async function () {
       shadowRoot.remove()
     }
   }
+  const debugCoreUnderlineLayout = async (targetText: string) => {
+    const { draw, shadowRoot } = createCoreDebugDraw(EditorMode.PRINT)
+
+    try {
+      draw.render({
+        isSubmitHistory: false,
+        isSetCursor: false
+      })
+      const mainPositionList = draw
+        .getPosition()
+        .getOriginalMainPositionList()
+      const visiblePositionList = mainPositionList.filter(position =>
+        Boolean(position.value)
+      )
+      const directPositionList = visiblePositionList.filter(position =>
+        (position.value || '').includes(targetText)
+      )
+      const positionList = directPositionList.length
+        ? directPositionList
+        : (() => {
+            let cursor = 0
+            const spanList = visiblePositionList.map(position => {
+              const value = position.value || ''
+              const start = cursor
+              cursor += value.length
+              return {
+                position,
+                start,
+                end: cursor
+              }
+            })
+            const fullText = visiblePositionList
+              .map(position => position.value || '')
+              .join('')
+            const targetStart = fullText.indexOf(targetText)
+            if (targetStart < 0) {
+              return []
+            }
+            const targetEnd = targetStart + targetText.length
+            return spanList
+              .filter(span => span.end > targetStart && span.start < targetEnd)
+              .map(span => span.position)
+          })()
+
+      const rowList = draw.getRowList()
+      const options = draw.getOptions()
+      const elementList = draw.getOriginalMainElementList()
+
+      return positionList.map(position => {
+        const row = rowList[position.rowIndex]
+        const rowElement = row?.elementList.find(
+          (_, elementIndex) => row.startIndex + elementIndex === position.index
+        )
+        const element = rowElement || elementList[position.index]
+        const rowMargin = element ? draw.getElementRowMargin(element as any) : 0
+        const subscriptOffset =
+          rowElement?.type === ElementType.SUBSCRIPT
+            ? rowElement.metrics.height / 2
+            : 0
+        const recordedUnderlineBaseY =
+          position.coordinate.leftTop[1] +
+          (row?.height || 0) -
+          rowMargin +
+          subscriptOffset
+        const modelUnderlineY = Math.floor(
+          recordedUnderlineBaseY + 2 * options.scale
+        )
+        const renderedUnderlineY = modelUnderlineY + 0.5
+
+        return {
+          value: position.value,
+          index: position.index,
+          pageNo: position.pageNo,
+          rowIndex: position.rowIndex,
+          rowNo: position.rowNo,
+          left: position.coordinate.leftTop[0],
+          right: position.coordinate.rightTop[0],
+          top: position.coordinate.leftTop[1],
+          bottom: position.coordinate.leftBottom[1],
+          ascent: position.ascent,
+          lineHeight: position.lineHeight,
+          rowHeight: row?.height || 0,
+          rowMargin,
+          subscriptOffset,
+          recordedUnderlineBaseY,
+          modelUnderlineY,
+          renderedUnderlineY
+        }
+      })
+    } finally {
+      draw.destroy()
+      shadowRoot.remove()
+    }
+  }
+  const debugCoreUnderlineRenderTrace = async (targetText: string) => {
+    const { draw, shadowRoot } = createCoreDebugDraw(EditorMode.PRINT)
+
+    const prototype = CanvasRenderingContext2D.prototype
+    const fillText = prototype.fillText
+    const moveTo = prototype.moveTo
+    const lineTo = prototype.lineTo
+    const stroke = prototype.stroke
+    const strokeNoArg =
+      prototype.stroke as (this: CanvasRenderingContext2D) => void
+    const strokeWithPath =
+      prototype.stroke as (
+        this: CanvasRenderingContext2D,
+        path: Path2D
+      ) => void
+
+    const trace = {
+      textRunList: [] as Array<{
+        text: string
+        x: number
+        y: number
+        font: string
+      }>,
+      lineList: [] as Array<{
+        fromX: number
+        fromY: number
+        toX: number
+        toY: number
+        strokeStyle: string | CanvasGradient | CanvasPattern
+        lineWidth: number
+      }>
+    }
+
+    let pendingLineStart: null | { x: number; y: number } = null
+
+    try {
+      prototype.fillText = function (
+        text: string,
+        x: number,
+        y: number,
+        maxWidth?: number
+      ) {
+        if (
+          text &&
+          (
+            targetText.includes(text) ||
+            text.includes(targetText)
+          )
+        ) {
+          trace.textRunList.push({
+            text,
+            x,
+            y,
+            font: this.font
+          })
+        }
+        return typeof maxWidth === 'number'
+          ? fillText.call(this, text, x, y, maxWidth)
+          : fillText.call(this, text, x, y)
+      }
+
+      prototype.moveTo = function (x: number, y: number) {
+        pendingLineStart = { x, y }
+        return moveTo.call(this, x, y)
+      }
+
+      prototype.lineTo = function (x: number, y: number) {
+        if (pendingLineStart) {
+          trace.lineList.push({
+            fromX: pendingLineStart.x,
+            fromY: pendingLineStart.y,
+            toX: x,
+            toY: y,
+            strokeStyle: this.strokeStyle,
+            lineWidth: this.lineWidth
+          })
+        }
+        return lineTo.call(this, x, y)
+      }
+
+      prototype.stroke = function (path?: Path2D) {
+        pendingLineStart = null
+        return typeof path === 'undefined'
+          ? strokeNoArg.call(this)
+          : strokeWithPath.call(this, path)
+      }
+
+      draw.render({
+        isSubmitHistory: false,
+        isSetCursor: false,
+        isLazy: false
+      })
+
+      return trace
+    } finally {
+      prototype.fillText = fillText
+      prototype.moveTo = moveTo
+      prototype.lineTo = lineTo
+      prototype.stroke = stroke
+      draw.destroy()
+      shadowRoot.remove()
+    }
+  }
+  const debugCoreTextRenderTrace = async (targetText: string) => {
+    const { draw, shadowRoot } = createCoreDebugDraw(EditorMode.PRINT)
+
+    const prototype = CanvasRenderingContext2D.prototype
+    const fillText = prototype.fillText
+    const trace: Array<{
+      text: string
+      x: number
+      y: number
+      font: string
+    }> = []
+
+    try {
+      prototype.fillText = function (
+        text: string,
+        x: number,
+        y: number,
+        maxWidth?: number
+      ) {
+        if (
+          text &&
+          (
+            targetText.includes(text) ||
+            text.includes(targetText)
+          )
+        ) {
+          trace.push({
+            text,
+            x,
+            y,
+            font: this.font
+          })
+        }
+        return typeof maxWidth === 'number'
+          ? fillText.call(this, text, x, y, maxWidth)
+          : fillText.call(this, text, x, y)
+      }
+
+      draw.render({
+        isSubmitHistory: false,
+        isSetCursor: false,
+        isLazy: false
+      })
+
+      return trace
+    } finally {
+      prototype.fillText = fillText
+      draw.destroy()
+      shadowRoot.remove()
+    }
+  }
   if (import.meta.env.DEV) {
     Reflect.set(window, '__editorInstance', instance)
     Reflect.set(window, '__exportPdfBase64', exportPdfBase64)
@@ -500,6 +754,9 @@ window.onload = async function () {
     Reflect.set(window, '__debugCorePrintRows', debugCorePrintRows)
     Reflect.set(window, '__debugCoreHeaderLayout', debugCoreHeaderLayout)
     Reflect.set(window, '__debugCoreMainLayout', debugCoreMainLayout)
+    Reflect.set(window, '__debugCoreUnderlineLayout', debugCoreUnderlineLayout)
+    Reflect.set(window, '__debugCoreUnderlineRenderTrace', debugCoreUnderlineRenderTrace)
+    Reflect.set(window, '__debugCoreTextRenderTrace', debugCoreTextRenderTrace)
     Reflect.set(window, '__jspdfDebug', {
       fontUrls: {
         SimSun: simsunTtfUrl

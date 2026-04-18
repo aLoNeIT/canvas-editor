@@ -5,6 +5,26 @@ export interface IMeasuredTextMetric {
 }
 
 let measureCanvas: HTMLCanvasElement | null = null
+let measureCanvasDocument: Document | null = null
+
+function createFallbackMetric(text: string, size: number): IMeasuredTextMetric {
+  return {
+    width: text.length * size,
+    ascent: size * 0.8,
+    descent: size * 0.2
+  }
+}
+
+function getMeasureContext() {
+  if (typeof document === 'undefined') {
+    return null
+  }
+  if (!measureCanvas || measureCanvasDocument !== document) {
+    measureCanvas = document.createElement('canvas')
+    measureCanvasDocument = document
+  }
+  return measureCanvas.getContext('2d')
+}
 
 export function measureLineHeight(
   font: string,
@@ -23,10 +43,9 @@ export function measureText(
   bold?: boolean,
   italic?: boolean
 ): IMeasuredTextMetric {
-  measureCanvas ||= document.createElement('canvas')
-  const ctx = measureCanvas.getContext('2d')
+  const ctx = getMeasureContext()
   if (!ctx) {
-    throw new Error('Canvas text measurement is unavailable')
+    return createFallbackMetric(text, size)
   }
   ctx.font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${size}px ${font}`
   const metric = ctx.measureText(text)

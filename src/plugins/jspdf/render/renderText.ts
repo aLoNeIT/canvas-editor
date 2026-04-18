@@ -3,26 +3,6 @@ import type { IPageModel } from '../model/layout'
 import type { IPdfTextRun } from '../types'
 import { resolvePdfFontFamily } from './fontFamily'
 import { resolvePdfTextFontStyle } from './fontStyle'
-import { PDF_RENDER_STAGE } from './renderStage'
-
-const PDF_TEXT_VERTICAL_OFFSET = 0.5
-const PDF_TEXT_VERTICAL_SCALE_Y = 0.97
-
-function resolveTextVerticalOffset(run: IPdfTextRun) {
-  if (run.stage === PDF_RENDER_STAGE.HEADER) {
-    return 0.5
-  }
-
-  return PDF_TEXT_VERTICAL_OFFSET
-}
-
-function resolveTextVerticalScaleY(run: IPdfTextRun) {
-  if (run.stage === PDF_RENDER_STAGE.HEADER) {
-    return 1
-  }
-
-  return PDF_TEXT_VERTICAL_SCALE_Y
-}
 
 export function renderTextRun(
   doc: jsPDF,
@@ -44,32 +24,19 @@ export function renderTextRun(
   doc.setFontSize(run.size)
   doc.setTextColor(run.color || '#000000')
   const pdfTextWidth = doc.getTextWidth(run.text)
+  const spacingWidth = (run.letterSpacing || 0) * run.text.length
+  const effectiveRunWidth = Math.max(0, run.width - spacingWidth)
   const horizontalScale =
-    run.width > 0 && pdfTextWidth > 0
-      ? run.width / pdfTextWidth
+    effectiveRunWidth > 0 && pdfTextWidth > 0
+      ? effectiveRunWidth / pdfTextWidth
       : undefined
-  const textYOffset = resolveTextVerticalOffset(run)
-  const textVerticalScaleY = resolveTextVerticalScaleY(run)
   if (typeof doc.setCharSpace === 'function') {
     doc.setCharSpace(run.letterSpacing || 0)
   }
-  if (
-    textVerticalScaleY !== 1 &&
-    !run.rotate &&
-    typeof doc.advancedAPI === 'function'
-  ) {
-    doc.advancedAPI(pdf => {
-      pdf.text(run.text, run.x, run.y + textYOffset, {
-        angle: pdf.Matrix(1, 0, 0, textVerticalScaleY, 0, 0),
-        horizontalScale
-      })
-    })
-  } else {
-    doc.text(run.text, run.x, run.y + textYOffset, {
-      angle: run.rotate || 0,
-      horizontalScale
-    })
-  }
+  doc.text(run.text, run.x, run.y, {
+    angle: run.rotate || 0,
+    horizontalScale
+  })
   if (typeof doc.setCharSpace === 'function' && run.letterSpacing) {
     doc.setCharSpace(0)
   }

@@ -6,6 +6,7 @@ import Editor, {
 import { layoutDocument } from './layout/layoutDocument'
 import { assertNoFallback } from './debug/assertNoFallback'
 import { collectDiagnostics } from './debug/collectDiagnostics'
+import type { TPdfFontFileMap } from './fontRegistration'
 import { normalizeDocument } from './normalize/normalizeDocument'
 import { renderPdfBase64 } from './renderPdf'
 import { installBadgeStateTracking } from './source/badgeState'
@@ -15,7 +16,7 @@ import {
 } from './source/readEditorState'
 
 export interface IJspdfPluginOption {
-  fonts?: Record<string, string>
+  fonts?: Record<string, TPdfFontFileMap>
   defaultFontFamily?: string
   debug?: boolean
   disableTextRasterFallback?: boolean

@@ -10,6 +10,9 @@ export interface IMeasureTableRowHeightOption {
   columnWidthList?: number[]
   font?: string
   size?: number
+  rowMargin?: number
+  defaultRowMargin?: number
+  defaultBasicRowMarginHeight?: number
   bold?: boolean
   italic?: boolean
   tabWidth?: number
@@ -30,6 +33,9 @@ export interface IResolveTableRowHeightListOption {
   columnWidthList: number[]
   font?: string
   size?: number
+  rowMargin?: number
+  defaultRowMargin?: number
+  defaultBasicRowMarginHeight?: number
   bold?: boolean
   italic?: boolean
   tabWidth?: number
@@ -62,12 +68,18 @@ function getTableCellContentHeight(
   columnWidthList?: number[],
   font?: string,
   size?: number,
+  rowMargin?: number,
+  defaultRowMargin?: number,
+  defaultBasicRowMarginHeight?: number,
   bold?: boolean,
   italic?: boolean
 ) {
   const runList = extractTableCellTextRuns(td, {
     font,
     size,
+    rowMargin,
+    defaultRowMargin,
+    defaultBasicRowMarginHeight,
     bold,
     italic,
     lineHeight,
@@ -82,13 +94,17 @@ function getTableCellContentHeight(
       .reduce((sum, width) => sum + width, 0)
     : (baseCellWidth || 0) * colspan
   const cellWidth = Math.max(0, measuredWidth - 12)
-  return createStyledTextRunPlacements({
+  const { lineList } = createStyledTextRunPlacements({
     runList,
     x: 0,
     y: 0,
     width: cellWidth,
     measureWidth
-  }).contentHeight
+  })
+  return lineList.reduce(
+    (sum, line) => sum + line.height + line.rowMargin * 2,
+    0
+  )
 }
 
 export function measureTableRowHeight(
@@ -106,6 +122,9 @@ export function measureTableRowHeight(
         option.columnWidthList,
         option.font,
         option.size,
+        option.rowMargin,
+        option.defaultRowMargin,
+        option.defaultBasicRowMarginHeight,
         option.bold,
         option.italic
       )
@@ -132,6 +151,9 @@ export function resolveTableRowHeightList(
         option.columnWidthList,
         option.font,
         option.size,
+        option.rowMargin,
+        option.defaultRowMargin,
+        option.defaultBasicRowMarginHeight,
         option.bold,
         option.italic
       )

@@ -12,16 +12,20 @@ export interface IFrameLayoutResult {
 export function layoutFrame(documentModel: IDocumentModel): IFrameLayoutResult {
   const [top, , bottom] = documentModel.margins
   const scale = documentModel.scale || 1
-  const headerTop = documentModel.defaults.header.disabled
+  const headerDisabled = documentModel.defaults.header?.disabled ?? false
+  const headerOffsetTop = documentModel.defaults.header?.top ?? 0
+  const footerDisabled = documentModel.defaults.footer?.disabled ?? false
+  const footerOffsetBottom = documentModel.defaults.footer?.bottom ?? 0
+  const headerTop = headerDisabled
     ? 0
-    : Math.floor(documentModel.defaults.header.top * scale)
-  const headerHeight = documentModel.defaults.header.disabled
+    : Math.floor(headerOffsetTop * scale)
+  const headerHeight = headerDisabled
     ? 0
     : documentModel.header.height
-  const footerBottomOffset = documentModel.defaults.footer.disabled
+  const footerBottomOffset = footerDisabled
     ? 0
-    : Math.floor(documentModel.defaults.footer.bottom * scale)
-  const footerHeight = documentModel.defaults.footer.disabled
+    : Math.floor(footerOffsetBottom * scale)
+  const footerHeight = footerDisabled
     ? 0
     : documentModel.footer.height
   const headerExtraHeight = Math.max(0, headerTop + headerHeight - top)

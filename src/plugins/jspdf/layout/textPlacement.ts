@@ -22,15 +22,36 @@ export interface ITextPlacement {
   height: number
   font: string
   size: number
+  ascent?: number
+  descent?: number
   widthOverride?: number
   baselineShift?: number
+  rowMargin?: number
   letterSpacing?: number
   bold?: boolean
   italic?: boolean
   underline?: boolean
   strikeout?: boolean
   color?: string
+  highlight?: string
+  linkUrl?: string
+  areaId?: string
+  areaBackgroundColor?: string
+  areaBorderColor?: string
+  controlKey?: object
+  controlBorder?: boolean
+  inlineImageDataUrl?: string
+  inlineImageWidth?: number
+  inlineImageHeight?: number
+  inlineImageCrop?: ITextPlacementInlineImageCrop
   baselineOffset: number
+}
+
+export interface ITextPlacementInlineImageCrop {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 export function createTextPlacements(
@@ -50,6 +71,8 @@ export function createTextPlacements(
     height: option.lineHeight,
     font: option.font,
     size: option.size,
+    ascent: option.size * 0.8,
+    descent: option.size * 0.2,
     bold: option.bold,
     italic: option.italic,
     color: option.color,

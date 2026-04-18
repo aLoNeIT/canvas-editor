@@ -155,6 +155,66 @@ async function testBootstrapPdfFontsRegistersAllTextStyles() {
   )
 }
 
+async function testRegisterPdfFontStylesSupportsPerStyleFontFiles() {
+  const addFontCallList: Array<{
+    filename: string
+    family: string
+    style: string
+  }> = []
+  const fontMap = new Map<string, Record<string, string>>()
+
+  const doc = {
+    getFontList() {
+      return Object.fromEntries(fontMap.entries())
+    },
+    addFont(filename: string, family: string, style: string) {
+      addFontCallList.push({
+        filename,
+        family,
+        style
+      })
+      const styleMap = fontMap.get(family) || {}
+      styleMap[style] = family
+      fontMap.set(family, styleMap)
+    },
+    setFont() {
+      return undefined
+    }
+  }
+
+  registerPdfFontStyles(
+    doc as any,
+    {
+      normal: 'SimSun.ttf',
+      bold: 'SimHei.ttf'
+    },
+    'SimSun'
+  )
+
+  assert.deepEqual(addFontCallList, [
+    {
+      filename: 'SimSun.ttf',
+      family: 'SimSun',
+      style: 'normal'
+    },
+    {
+      filename: 'SimHei.ttf',
+      family: 'SimSun',
+      style: 'bold'
+    },
+    {
+      filename: 'SimSun.ttf',
+      family: 'SimSun',
+      style: 'italic'
+    },
+    {
+      filename: 'SimSun.ttf',
+      family: 'SimSun',
+      style: 'bolditalic'
+    }
+  ])
+}
+
 function createJspdfPluginCommandHarness(
   options: {
     pageModels?: any[]
@@ -4048,9 +4108,9 @@ async function testLayoutDocumentInheritsTextControlStyles() {
       [
         {
           x1: 0,
-          y1: 26,
+          y1: 25,
           x2: 30,
-          y2: 26,
+          y2: 25,
           color: '#000000',
           width: 1
         },
@@ -4435,6 +4495,425 @@ async function testLayoutDocumentRendersNumberControlValue() {
           text: '-12.5',
           bold: true,
           color: '#0055aa'
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRendersEmptySelectControlPlaceholder() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const option = createRuntimeSourceOptions()
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.CONTROL,
+                value: '',
+                control: {
+                  type: ControlType.SELECT,
+                  value: null,
+                  code: null,
+                  placeholder: '请选择',
+                  prefix: '{',
+                  postfix: '}'
+                }
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: option
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(run => ({
+        text: run.text,
+        color: run.color
+      })),
+      [
+        {
+          text: '{',
+          color: '#666666'
+        },
+        {
+          text: '请选择',
+          color: '#999999'
+        },
+        {
+          text: '}',
+          color: '#666666'
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRendersEmptyNumberControlPlaceholder() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const option = createRuntimeSourceOptions()
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.CONTROL,
+                value: '',
+                control: {
+                  type: ControlType.NUMBER,
+                  value: null,
+                  placeholder: '请输入次数',
+                  prefix: '{',
+                  postfix: '}'
+                }
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: option
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(run => ({
+        text: run.text,
+        color: run.color
+      })),
+      [
+        {
+          text: '{',
+          color: '#666666'
+        },
+        {
+          text: '请输入次数',
+          color: '#999999'
+        },
+        {
+          text: '}',
+          color: '#666666'
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+async function testLayoutDocumentRendersFixedWidthUnderlineForEmptyTextControl() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const option = createRuntimeSourceOptions()
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.CONTROL,
+                value: '',
+                control: {
+                  type: ControlType.TEXT,
+                  value: null,
+                  minWidth: 160,
+                  underline: true,
+                  prefix: '\u200c',
+                  postfix: '\u200c',
+                  placeholder: ''
+                }
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: option
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(run => ({
+        text: run.text,
+        width: run.width
+      })),
+      [
+        {
+          text: '\u200c',
+          width: 160
+        }
+      ]
+    )
+    assert.deepEqual(
+      pageList[0].vectorLines.map(line => ({
+        x1: line.x1,
+        x2: line.x2
+      })),
+      [
+        {
+          x1: 0,
+          x2: 160
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+/*
+async function testLayoutDocumentSkipsWrapperTextForEmptyControl() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const option = createRuntimeSourceOptions()
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.CONTROL,
+                value: '',
+                control: {
+                  type: ControlType.TEXT,
+                  value: null,
+                  placeholder: '璇疯緭鍏?,
+                  prefix: '{',
+                  postfix: '}',
+                  preText: '鍓?,
+                  postText: '鍚?'
+                }
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: option
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(run => ({
+        text: run.text,
+        color: run.color
+      })),
+      [
+        {
+          text: '{',
+          color: '#666666'
+        },
+        {
+          text: '璇疯緭鍏?,
+          color: '#999999'
+        },
+        {
+          text: '}',
+          color: '#666666'
+        }
+      ]
+    )
+    assert.deepEqual(pageList[0].issues, [])
+  } finally {
+    runtimeGlobal.document = previousDocument
+  }
+}
+
+*/
+
+async function testLayoutDocumentSkipsWrapperTextForEmptyControl() {
+  const previousDocument = globalThis.document
+  const runtimeGlobal = globalThis as any
+
+  runtimeGlobal.document = {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        getContext() {
+          return {
+            font: '',
+            measureText(text: string) {
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: 12,
+                actualBoundingBoxDescent: 8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    const option = createRuntimeSourceOptions()
+    const pageList = await layoutDocument(
+      normalizeDocument({
+        result: {
+          data: {
+            header: [],
+            main: [
+              {
+                type: ElementType.CONTROL,
+                value: '',
+                control: {
+                  type: ControlType.TEXT,
+                  value: null,
+                  placeholder: '请输入',
+                  prefix: '{',
+                  postfix: '}',
+                  preText: '前',
+                  postText: '后'
+                }
+              }
+            ],
+            footer: [],
+            graffiti: []
+          }
+        },
+        options: option
+      } as any)
+    )
+
+    assert.deepEqual(
+      pageList[0].textRuns.map(run => ({
+        text: run.text,
+        color: run.color
+      })),
+      [
+        {
+          text: '{',
+          color: '#666666'
+        },
+        {
+          text: '请输入',
+          color: '#999999'
+        },
+        {
+          text: '}',
+          color: '#666666'
         }
       ]
     )
@@ -11131,6 +11610,8 @@ function testCreatesDecorationLinesFromPlacements() {
       height: 20,
       font: 'Song',
       size: 12,
+      ascent: 9,
+      descent: 2,
       color: '#ff0000',
       underline: true,
       baselineOffset: 12
@@ -11143,6 +11624,8 @@ function testCreatesDecorationLinesFromPlacements() {
       height: 20,
       font: 'Song',
       size: 12,
+      ascent: 9,
+      descent: 2,
       color: '#0000ff',
       strikeout: true,
       baselineOffset: 12
@@ -11160,9 +11643,9 @@ function testCreatesDecorationLinesFromPlacements() {
     [
       {
         x1: 10,
-        y1: 22,
+        y1: 21,
         x2: 30,
-        y2: 22,
+        y2: 21,
         color: '#ff0000'
       },
       {
@@ -11171,6 +11654,56 @@ function testCreatesDecorationLinesFromPlacements() {
         x2: 60,
         y2: 15.8,
         color: '#0000ff'
+      }
+    ]
+  )
+}
+
+function testCreatesUnderlineLinesUsingTextMetrics() {
+  const lineList = createTextDecorationLines([
+    {
+      text: 'small',
+      x: 0,
+      y: 20,
+      width: 40,
+      height: 16,
+      font: 'Song',
+      size: 12,
+      ascent: 10,
+      descent: 1,
+      underline: true,
+      color: '#111111',
+      baselineOffset: 10
+    },
+    {
+      text: 'large',
+      x: 0,
+      y: 60,
+      width: 80,
+      height: 36,
+      font: 'Song',
+      size: 32,
+      ascent: 26,
+      descent: 4,
+      underline: true,
+      color: '#222222',
+      baselineOffset: 26
+    }
+  ])
+
+  assert.deepEqual(
+    lineList.map(({ y1, color }) => ({
+      y1,
+      color
+    })),
+    [
+      {
+        y1: 21,
+        color: '#111111'
+      },
+      {
+        y1: 62,
+        color: '#222222'
       }
     ]
   )
@@ -12760,6 +13293,7 @@ async function testJspdfPluginRenderPdfPassesThroughInNormalMode() {
 async function run() {
   testReadEditorStateFiltersAssistElementsInPrintMode()
   await testBootstrapPdfFontsRegistersAllTextStyles()
+  await testRegisterPdfFontStylesSupportsPerStyleFontFiles()
   testWrapsLongTextByWidth()
   testPreservesExplicitLineBreaks()
   testExpandsTableRowHeightForWrappedCellText()
@@ -12805,6 +13339,10 @@ async function run() {
   await testLayoutDocumentAppendsTextControlBorder()
   await testLayoutDocumentRendersDateControlValue()
   await testLayoutDocumentRendersNumberControlValue()
+  await testLayoutDocumentRendersEmptySelectControlPlaceholder()
+  await testLayoutDocumentRendersEmptyNumberControlPlaceholder()
+  await testLayoutDocumentRendersFixedWidthUnderlineForEmptyTextControl()
+  await testLayoutDocumentSkipsWrapperTextForEmptyControl()
   await testLayoutDocumentRendersDateWrapperText()
   await testLayoutDocumentRendersLatexAsImage()
   await testLayoutDocumentMarksBlockIframeAndVideoAsPending()

@@ -66,7 +66,7 @@ function getResolvedTitleSize(
   return defaults.defaultSize
 }
 
-function getRowMarginRatio(fontSize: number) {
+export function getRowMarginRatio(fontSize: number) {
   if (fontSize < 12) {
     return fontSize / 12
   }

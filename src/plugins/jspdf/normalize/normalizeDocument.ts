@@ -5,6 +5,7 @@ import type {
   IDocumentModel,
   IZoneModel
 } from '../model/document'
+import { ImageDisplay } from '../../../editor/dataset/enum/Common'
 import { ElementType } from '../../../editor/dataset/enum/Element'
 import { TitleLevel } from '../../../editor/dataset/enum/Title'
 import { resolveLatexAsset } from '../layout/latex'
@@ -176,14 +177,15 @@ function createZone(
 
 function isStandaloneBlockElement(element: IDocumentBlockNode['element']) {
   return (
-    element.type === ElementType.TITLE ||
     element.type === ElementType.LIST ||
     element.type === ElementType.DATE ||
     element.type === ElementType.TABLE ||
-    element.type === ElementType.IMAGE ||
-    element.type === ElementType.LATEX ||
+    (element.type === ElementType.IMAGE &&
+      (element.imgDisplay === ImageDisplay.BLOCK ||
+        element.imgDisplay === ImageDisplay.SURROUND ||
+        element.imgDisplay === ImageDisplay.FLOAT_TOP ||
+        element.imgDisplay === ImageDisplay.FLOAT_BOTTOM)) ||
     element.type === ElementType.BLOCK ||
-    element.type === ElementType.LABEL ||
     element.type === ElementType.SEPARATOR ||
     element.type === ElementType.PAGE_BREAK
   )
@@ -337,6 +339,15 @@ function createBlockList(
       return
     }
 
+    if (element.listId && element.listType) {
+      flushInlineElementList()
+      const paragraphBlock = createParagraphBlock([element])
+      if (paragraphBlock) {
+        blockList.push(paragraphBlock)
+      }
+      return
+    }
+
     if (isStandaloneBlockElement(element)) {
       flushInlineElementList()
       blockList.push({
@@ -424,15 +435,15 @@ export function normalizeDocument(source: IJspdfSourceState): IDocumentModel {
     main: null,
     areas: []
   }
+  const exportOptions = source.exportOptions || {}
 
   return {
     width: source.options.width,
     height: source.options.height,
     margins: [...source.options.margins],
     scale: source.options.scale,
-    printPageDataUrlList: source.exportOptions.__printPageDataUrlList,
-    disableTextRasterFallback:
-      source.exportOptions.disableTextRasterFallback,
+    printPageDataUrlList: exportOptions.__printPageDataUrlList,
+    disableTextRasterFallback: exportOptions.disableTextRasterFallback ?? true,
     badge: {
       top: source.options.badge.top,
       left: source.options.badge.left,
