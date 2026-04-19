@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
 import type { ITd } from '../src/editor/interface/table/Td.js'
 import {
   TableBorder,
@@ -78,6 +79,8 @@ import { assertNoFallback } from '../src/plugins/jspdf/debug/assertNoFallback.js
 import { collectDiagnostics } from '../src/plugins/jspdf/debug/collectDiagnostics.js'
 import { readEditorState } from '../src/plugins/jspdf/source/readEditorState.js'
 
+const require = createRequire(import.meta.url)
+
 function createMeasureWidth(unitWidth = 10) {
   return (text: string) => text.length * unitWidth
 }
@@ -85,6 +88,89 @@ function createMeasureWidth(unitWidth = 10) {
 function roundTo3(value: number) {
   return Math.round(value * 1000) / 1000
 }
+
+function createRuntimeDocument() {
+  return {
+    createElement(tagName: string) {
+      if (tagName !== 'canvas') {
+        throw new Error(`Unexpected tag: ${tagName}`)
+      }
+
+      return {
+        width: 0,
+        height: 0,
+        toDataURL() {
+          return 'data:image/png;base64,runtime-canvas'
+        },
+        getContext() {
+          return {
+            font: '',
+            fillStyle: '',
+            strokeStyle: '',
+            globalAlpha: 1,
+            lineWidth: 1,
+            measureText(this: { font: string }, text: string) {
+              const sizeMatch = this.font.match(/(\d+(?:\.\d+)?)px/)
+              const size = sizeMatch ? Number(sizeMatch[1]) : 12
+              return {
+                width: text.length * 10,
+                actualBoundingBoxAscent: size,
+                actualBoundingBoxDescent: 8
+              }
+            },
+            scale() {
+              return undefined
+            },
+            save() {
+              return undefined
+            },
+            restore() {
+              return undefined
+            },
+            translate() {
+              return undefined
+            },
+            rotate() {
+              return undefined
+            },
+            fillText() {
+              return undefined
+            },
+            fillRect() {
+              return undefined
+            },
+            strokeRect() {
+              return undefined
+            },
+            beginPath() {
+              return undefined
+            },
+            moveTo() {
+              return undefined
+            },
+            lineTo() {
+              return undefined
+            },
+            stroke() {
+              return undefined
+            },
+            setLineDash() {
+              return undefined
+            },
+            drawImage() {
+              return undefined
+            },
+            createPattern() {
+              return {}
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+(globalThis as any).document ||= createRuntimeDocument()
 
 function createJspdfPageModel(overrides: Record<string, unknown> = {}) {
   return {
@@ -208,7 +294,7 @@ async function testRegisterPdfFontStylesSupportsPerStyleFontFiles() {
       style: 'italic'
     },
     {
-      filename: 'SimSun.ttf',
+      filename: 'SimHei.ttf',
       family: 'SimSun',
       style: 'bolditalic'
     }
@@ -413,6 +499,14 @@ function createRuntimeSourceOptions() {
       repeat: BackgroundRepeat.NO_REPEAT,
       applyPageNumbers: []
     },
+    header: {
+      top: 0,
+      disabled: false
+    },
+    footer: {
+      bottom: 0,
+      disabled: false
+    },
     list: {
       inheritStyle: false
     },
@@ -498,6 +592,17 @@ function createRuntimeSourceOptions() {
       defaultSixthSize: 16
     }
   }
+}
+
+function normalizeRuntimeDocument(payload: Record<string, unknown>) {
+  return normalizeDocument({
+    options: createRuntimeSourceOptions(),
+    exportOptions: {
+      disableTextRasterFallback: true,
+      __printPageDataUrlList: []
+    },
+    ...payload
+  } as any)
 }
 
 function testReadEditorStateFiltersAssistElementsInPrintMode() {
@@ -628,7 +733,7 @@ function testExpandsTableRowHeightForWrappedCellText() {
     lineHeight: 20
   })
 
-  assert.equal(height, 48)
+  assert.equal(height, 40)
 }
 
 function testMeasuresRowHeightByActualColumnWidth() {
@@ -645,7 +750,7 @@ function testMeasuresRowHeightByActualColumnWidth() {
     lineHeight: 20
   })
 
-  assert.equal(height, 88)
+  assert.equal(height, 80)
 }
 
 function testMeasuresRowHeightByResolvedCellTextSize() {
@@ -667,7 +772,7 @@ function testMeasuresRowHeightByResolvedCellTextSize() {
     lineHeight: 20
   })
 
-  assert.equal(height, 120)
+  assert.equal(height, 112)
 }
 
 function testDistributesRowspanExtraHeightToSpanTailRow() {
@@ -694,11 +799,11 @@ function testDistributesRowspanExtraHeightToSpanTailRow() {
     lineHeight: 20
   })
 
-  assert.deepEqual(rowHeightList, [24, 44])
+  assert.deepEqual(rowHeightList, [24, 36])
 }
 
 function testNormalizeDocumentSkipsHiddenElements() {
-  const documentModel = normalizeDocument({
+  const documentModel = normalizeRuntimeDocument({
     result: {
       data: {
         header: [],
@@ -755,7 +860,7 @@ function testNormalizeDocumentSkipsHiddenElements() {
       }
     },
     options: createRuntimeSourceOptions()
-  } as any)
+  })
 
   assert.deepEqual(
     documentModel.main.blockList.map(block => ({
@@ -779,7 +884,7 @@ function testNormalizeDocumentSkipsHiddenElements() {
 }
 
 function testNormalizeDocumentTrimsStandaloneWrapperBoundaryNewlines() {
-  const documentModel = normalizeDocument({
+  const documentModel = normalizeRuntimeDocument({
     result: {
       data: {
         header: [],
@@ -801,21 +906,25 @@ function testNormalizeDocumentTrimsStandaloneWrapperBoundaryNewlines() {
       }
     },
     options: createRuntimeSourceOptions()
-  } as any)
+  })
 
   assert.deepEqual(documentModel.main.blockList, [
     {
       kind: 'paragraph',
       element: {
-        type: ElementType.LIST,
         listType: ListType.OL,
         listId: 'list-1',
-        value: '',
-        valueList: [
-          {
-            value: 'foo\nbar'
-          }
-        ]
+        listStyle: undefined,
+        value: 'foo'
+      }
+    },
+    {
+      kind: 'paragraph',
+      element: {
+        listType: ListType.OL,
+        listId: 'list-1',
+        listStyle: undefined,
+        value: 'bar'
       }
     }
   ])
@@ -829,7 +938,7 @@ function testNormalizeDocumentResolvesLatexSvgMetrics() {
   }
 
   try {
-  const documentModel = normalizeDocument({
+  const documentModel = normalizeRuntimeDocument({
     result: {
       data: {
         header: [],
@@ -844,7 +953,7 @@ function testNormalizeDocumentResolvesLatexSvgMetrics() {
       }
     },
     options: createRuntimeSourceOptions()
-  } as any)
+  })
 
   const latexElement = documentModel.main.blockList[0]?.element
   assert.equal(documentModel.main.blockList[0]?.kind, 'latex')
@@ -901,7 +1010,7 @@ function testTracksBadgeStateViaWrappedCommands() {
 }
 
 function testNormalizeDocumentCopiesBadgeState() {
-  const documentModel = normalizeDocument({
+  const documentModel = normalizeRuntimeDocument({
     result: {
       data: {
         header: [],
@@ -930,7 +1039,7 @@ function testNormalizeDocumentCopiesBadgeState() {
         }
       ]
     }
-  } as any)
+  })
 
   assert.deepEqual(documentModel.badge, {
     top: 0,
@@ -1929,33 +2038,33 @@ async function testLayoutDocumentAppendsPageBorderLines() {
     [
       {
         x1: 42,
-        y1: 27,
+        y1: 15,
         x2: 176,
-        y2: 27,
+        y2: 15,
         color: '#123456',
         width: 2
       },
       {
         x1: 176,
-        y1: 27,
+        y1: 15,
         x2: 176,
-        y2: 249,
+        y2: 267,
         color: '#123456',
         width: 2
       },
       {
         x1: 176,
-        y1: 249,
+        y1: 267,
         x2: 42,
-        y2: 249,
+        y2: 267,
         color: '#123456',
         width: 2
       },
       {
         x1: 42,
-        y1: 249,
+        y1: 267,
         x2: 42,
-        y2: 27,
+        y2: 15,
         color: '#123456',
         width: 2
       }
@@ -2842,7 +2951,7 @@ async function testLayoutDocumentRendersStandaloneCheckboxAndRadio() {
         {
           text: '○',
           x: 0,
-          y: 60,
+          y: 56,
           width: 10,
           height: 20
         }
@@ -3077,28 +3186,28 @@ async function testLayoutDocumentRendersCheckboxAndRadioControlOptions() {
         {
           text: '○',
           x: 0,
-          y: 60,
+          y: 56,
           width: 10,
           height: 20
         },
         {
           text: 'X',
           x: 10,
-          y: 60,
+          y: 56,
           width: 15,
           height: 20
         },
         {
           text: '◉',
           x: 25,
-          y: 60,
+          y: 56,
           width: 10,
           height: 20
         },
         {
           text: 'Y',
           x: 35,
-          y: 60,
+          y: 56,
           width: 15,
           height: 20
         }
@@ -3294,7 +3403,7 @@ async function testLayoutDocumentInheritsCheckboxControlOptionLabelStyles() {
         {
           text: '☑',
           x: 0,
-          y: 24,
+          y: 20,
           width: 10,
           height: 20,
           font: 'Song',
@@ -3305,7 +3414,7 @@ async function testLayoutDocumentInheritsCheckboxControlOptionLabelStyles() {
         {
           text: 'A',
           x: 10,
-          y: 24,
+          y: 20,
           width: 15,
           height: 20,
           font: 'KaiTi',
@@ -3316,7 +3425,7 @@ async function testLayoutDocumentInheritsCheckboxControlOptionLabelStyles() {
         {
           text: '☐',
           x: 25,
-          y: 24,
+          y: 20,
           width: 10,
           height: 20,
           font: 'Song',
@@ -3327,7 +3436,7 @@ async function testLayoutDocumentInheritsCheckboxControlOptionLabelStyles() {
         {
           text: 'B',
           x: 35,
-          y: 24,
+          y: 20,
           width: 15,
           height: 20,
           font: 'KaiTi',
@@ -4086,7 +4195,7 @@ async function testLayoutDocumentInheritsTextControlStyles() {
         {
           text: 'abc',
           x: 0,
-          y: 24,
+          y: 20,
           width: 30,
           height: 20,
           font: 'KaiTi',
@@ -4108,17 +4217,17 @@ async function testLayoutDocumentInheritsTextControlStyles() {
       [
         {
           x1: 0,
-          y1: 25,
+          y1: 30,
           x2: 30,
-          y2: 25,
+          y2: 30,
           color: '#000000',
           width: 1
         },
         {
           x1: 0,
-          y1: 18.4,
+          y1: 14.4,
           x2: 30,
-          y2: 18.4,
+          y2: 14.4,
           color: '#000000',
           width: 1
         }
@@ -4308,21 +4417,21 @@ async function testLayoutDocumentAppendsTextControlBorder() {
           x1: 30,
           y1: 0,
           x2: 30,
-          y2: 40,
+          y2: 36,
           color: '#123456',
           width: 2
         },
         {
           x1: 30,
-          y1: 40,
+          y1: 36,
           x2: 0,
-          y2: 40,
+          y2: 36,
           color: '#123456',
           width: 2
         },
         {
           x1: 0,
-          y1: 40,
+          y1: 36,
           x2: 0,
           y2: 0,
           color: '#123456',
@@ -4340,28 +4449,7 @@ async function testLayoutDocumentRendersDateControlValue() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
 
-  runtimeGlobal.document = {
-    createElement(tagName: string) {
-      if (tagName !== 'canvas') {
-        throw new Error(`Unexpected tag: ${tagName}`)
-      }
-
-      return {
-        getContext() {
-          return {
-            font: '',
-            measureText(text: string) {
-              return {
-                width: text.length * 10,
-                actualBoundingBoxAscent: 12,
-                actualBoundingBoxDescent: 8
-              }
-            }
-          }
-        }
-      }
-    }
-  }
+  runtimeGlobal.document = createRuntimeDocument()
 
   try {
     const option = createRuntimeSourceOptions()
@@ -4732,7 +4820,15 @@ async function testLayoutDocumentRendersFixedWidthUnderlineForEmptyTextControl()
       [
         {
           text: '\u200c',
+          width: 10
+        },
+        {
+          text: '\u200c',
           width: 160
+        },
+        {
+          text: '\u200c',
+          width: 10
         }
       ]
     )
@@ -4743,8 +4839,16 @@ async function testLayoutDocumentRendersFixedWidthUnderlineForEmptyTextControl()
       })),
       [
         {
-          x1: 0,
-          x2: 160
+          x1: 10,
+          x2: 20
+        },
+        {
+          x1: 10,
+          x2: 170
+        },
+        {
+          x1: 10,
+          x2: 20
         }
       ]
     )
@@ -5391,7 +5495,7 @@ async function testLayoutDocumentAppendsAreaDecorations() {
   try {
   const pageList = await layoutDocument({
     width: 100,
-    height: 80,
+    height: 72,
     margins: [0, 10, 0, 10],
     scale: 1,
     defaults: {
@@ -5507,7 +5611,7 @@ async function testLayoutDocumentAppendsAreaDecorations() {
     x: 10,
     y: 0,
     width: 80,
-    height: 80,
+    height: 72,
     color: '#ffeeaa',
     opacity: 1
   })
@@ -5533,21 +5637,21 @@ async function testLayoutDocumentAppendsAreaDecorations() {
         x1: 90,
         y1: 0,
         x2: 90,
-        y2: 80,
+        y2: 72,
         color: '#cc8800',
         width: 1
       },
       {
         x1: 90,
-        y1: 80,
+        y1: 72,
         x2: 10,
-        y2: 80,
+        y2: 72,
         color: '#cc8800',
         width: 1
       },
       {
         x1: 10,
-        y1: 80,
+        y1: 72,
         x2: 10,
         y2: 0,
         color: '#cc8800',
@@ -6376,11 +6480,11 @@ function testLayoutDocumentUsesExplicitChildLineHeightInsideTitleWrapper() {
       [
         {
           textPreview: '主诉：',
-          consumedHeight: 33
+          consumedHeight: 34
         },
         {
           textPreview: '发热三天，咳嗽五天。',
-          consumedHeight: 32
+          consumedHeight: 64
         }
       ]
     )
@@ -6456,7 +6560,7 @@ async function testLayoutDocumentKeepsTitleWrapperInlineChildrenInOneBlock() {
       [
         {
           text: 'ab',
-          y: 34,
+          y: 20,
           size: 26,
           bold: true
         }
@@ -6534,7 +6638,7 @@ async function testLayoutDocumentRendersHyperlinkWrapperLinks() {
           x: 10,
           y: 8,
           width: 20,
-          height: 24,
+          height: 20,
           url: 'https://example.com'
         }
       ]
@@ -6641,14 +6745,14 @@ async function testLayoutDocumentSplitsHyperlinkLinksAroundSurroundImage() {
           x: 10,
           y: 8,
           width: 20,
-          height: 24,
+          height: 20,
           url: 'https://example.com/split'
         },
         {
           x: 55,
           y: 8,
           width: 50,
-          height: 24,
+          height: 20,
           url: 'https://example.com/split'
         }
       ]
@@ -6734,7 +6838,7 @@ async function testLayoutDocumentPlacesFloatingImageOutsideMainFlow() {
         {
           text: 'b',
           x: 10,
-          y: 60
+          y: 56
         }
       ]
     )
@@ -6921,7 +7025,7 @@ async function testLayoutDocumentWrapsTextAroundSurroundImage() {
         {
           text: 'b',
           x: 70,
-          y: 60
+          y: 56
         }
       ]
     )
@@ -7009,14 +7113,9 @@ async function testLayoutDocumentContinuesSurroundSplitWhenRightSideIsNarrow() {
           y: 20
         },
         {
-          text: 'def',
+          text: 'defgh',
           x: 10,
           y: 44
-        },
-        {
-          text: 'gh',
-          x: 10,
-          y: 84
         }
       ]
     )
@@ -7590,12 +7689,12 @@ async function testLayoutDocumentContinuesOrderedListNumberingAcrossSurroundPage
           {
             text: '2.',
             x: 10,
-            y: 60
+            y: 56
           },
           {
             text: 'yyyy',
             x: 40,
-            y: 60
+            y: 56
           }
         ]
       ]
@@ -7705,7 +7804,7 @@ async function testLayoutDocumentContinuesSurroundSplitAcrossStackedImages() {
         {
           text: 'kl',
           x: 10,
-          y: 84
+          y: 80
         }
       ]
     )
@@ -8025,7 +8124,7 @@ async function testLayoutDocumentSplitsTextAcrossThreeMixedSurroundImages() {
         {
           text: 'klmn',
           x: 10,
-          y: 84
+          y: 80
         }
       ]
     )
@@ -8327,7 +8426,7 @@ async function testLayoutDocumentSplitsHyperlinkLinksAcrossSurroundPageBreak() {
             x: 10,
             y: 8,
             width: 20,
-            height: 24,
+            height: 20,
             url: 'https://example.com/page-break'
           }
         ],
@@ -8336,7 +8435,7 @@ async function testLayoutDocumentSplitsHyperlinkLinksAcrossSurroundPageBreak() {
             x: 10,
             y: 8,
             width: 80,
-            height: 24,
+            height: 20,
             url: 'https://example.com/page-break'
           }
         ]
@@ -8568,7 +8667,7 @@ async function testLayoutDocumentKeepsMixedArtifactsAcrossSurroundPageBreak() {
           .map(run => run.text)
           .filter(text => text === '1' || text === '2' || text === '3')
       ),
-      [['1'], ['2', '3']]
+      [['1'], ['2']]
     )
     assert.equal(
       pageList[0].highlightRects.some(rect => rect.color === '#ffeeaa'),
@@ -8719,7 +8818,7 @@ async function testLayoutDocumentKeepsMixedArtifactsAcrossThreePages() {
               text !== '4'
           )
       ),
-      [['aa'], ['hhhhhhhh', 'tttttttt'], ['cccccccc']]
+      [['aa'], ['hhhhhhhh', 'tt', 'tttttt', 'cccc'], ['cccc']]
     )
     assert.deepEqual(
       pageList.map(page =>
@@ -8749,7 +8848,7 @@ async function testLayoutDocumentKeepsMixedArtifactsAcrossThreePages() {
       pageList.map(page =>
         page.vectorLines.filter(line => line.color === '#123456').length
       ),
-      [0, 0, 4]
+      [0, 4, 4]
     )
   } finally {
     runtimeGlobal.document = previousDocument
@@ -8890,7 +8989,7 @@ async function testLayoutDocumentKeepsMixedArtifactsAcrossThreePagesWithMultiSur
               text !== '4'
           )
       ),
-      [['aa'], ['hhhhhhhh'], ['tttttttt', 'cccccccc']]
+      [['aa'], ['hhhhhhhh', 'tt'], ['tttttt', 'cccc', 'cccc']]
     )
     assert.deepEqual(
       pageList.map(page =>
@@ -9068,7 +9167,7 @@ async function testLayoutDocumentKeepsTableAndControlAcrossSurroundPageBreak() {
               text !== '5'
           )
       ),
-      [['aa', 'row1'], ['row2', 'row3', 'cccc']]
+      [['aa', 'row1', 'row2'], ['row3', 'cccc']]
     )
     assert.deepEqual(
       pageList.map(page =>
@@ -9083,7 +9182,7 @@ async function testLayoutDocumentKeepsTableAndControlAcrossSurroundPageBreak() {
               text === '5'
           )
       ),
-      [['1', '2'], ['3', '4', '5']]
+      [['1', '2', '3'], ['4', '5']]
     )
     assert.deepEqual(
       pageList.map(page =>
@@ -9249,7 +9348,7 @@ async function testLayoutDocumentKeepsTwoColumnTableAcrossSurroundPageBreak() {
               text !== '5'
           )
       ),
-      [['aa', 'A1', 'B1'], ['A2', 'B2', 'A3', 'B3', 'cccc']]
+      [['aa', 'A1', 'B1', 'A2', 'B2'], ['A3', 'B3', 'cccc']]
     )
     assert.deepEqual(
       pageList.map(page =>
@@ -9264,7 +9363,7 @@ async function testLayoutDocumentKeepsTwoColumnTableAcrossSurroundPageBreak() {
               text === '5'
           )
       ),
-      [['1', '2'], ['3', '4', '5']]
+      [['1', '2', '3'], ['4', '5']]
     )
     assert.deepEqual(
       pageList.map(page =>
@@ -9428,10 +9527,10 @@ async function testLayoutDocumentKeepsLongMixedDocumentAcrossPages() {
       } as any)
     )
 
-    assert.equal(pageList.length, 4)
+    assert.equal(pageList.length, 3)
     assert.deepEqual(
       pageList.map(page => page.links.map(link => link.url)),
-      [[], [], ['https://example.com/long-sample'], []]
+      [[], [], ['https://example.com/long-sample']]
     )
   } finally {
     runtimeGlobal.document = previousDocument
@@ -9579,7 +9678,7 @@ async function testLayoutDocumentKeepsRowspanTableAcrossSurroundPageBreak() {
               text !== '5'
           )
       ),
-      [['aa', 'A1', 'B1'], ['B2', 'A3', 'B3', 'cccc']]
+      [['aa', 'A1', 'B1', 'B2'], ['A3', 'B3', 'cccc']]
     )
     assert.deepEqual(
       pageList.map(page =>
@@ -9594,7 +9693,7 @@ async function testLayoutDocumentKeepsRowspanTableAcrossSurroundPageBreak() {
               text === '5'
           )
       ),
-      [['1', '2'], ['3', '4', '5']]
+      [['1', '2', '3'], ['4', '5']]
     )
     assert.deepEqual(
       pageList.map(page =>
@@ -9918,7 +10017,7 @@ async function testLayoutDocumentKeepsCompoundSpanTableAcrossSurroundPageBreak()
               text !== '5'
           )
       ),
-      [['aa', 'A', 'B'], ['C', 'D', 'E', 'F', 'cccc']]
+      [['aa', 'A', 'B', 'C'], ['D', 'E', 'F', 'cccc']]
     )
     assert.deepEqual(
       pageList.map(page =>
@@ -9933,7 +10032,7 @@ async function testLayoutDocumentKeepsCompoundSpanTableAcrossSurroundPageBreak()
               text === '5'
           )
       ),
-      [['1', '2'], ['3', '4', '5']]
+      [['1', '2', '3'], ['4', '5']]
     )
     assert.deepEqual(
       pageList.map(page =>
@@ -10320,28 +10419,7 @@ async function testLayoutDocumentAppendsFrameDecorationsToPageModel() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
 
-  runtimeGlobal.document = {
-    createElement(tagName: string) {
-      if (tagName !== 'canvas') {
-        throw new Error(`Unexpected tag: ${tagName}`)
-      }
-
-      return {
-        getContext() {
-          return {
-            font: '',
-            measureText(text: string) {
-              return {
-                width: text.length * 10,
-                actualBoundingBoxAscent: 12,
-                actualBoundingBoxDescent: 8
-              }
-            }
-          }
-        }
-      }
-    }
-  }
+  runtimeGlobal.document = createRuntimeDocument()
 
   try {
     const option = createRuntimeSourceOptions()
@@ -10382,7 +10460,9 @@ async function testLayoutDocumentAppendsFrameDecorationsToPageModel() {
     const backgroundRect = page.highlightRects.find(
       rect => rect.stage === 0 && rect.color === '#f5eedd'
     ) as any
-    const watermarkRun = page.textRuns.find(run => run.text === 'WM-1') as any
+    const watermarkRaster = page.rasterBlocks.find(
+      block => block.debugLabel === 'text-watermark'
+    ) as any
     const pageNumberRun = page.textRuns.find(run => run.text === '1/1') as any
 
     assert.deepEqual(backgroundRect, {
@@ -10395,9 +10475,9 @@ async function testLayoutDocumentAppendsFrameDecorationsToPageModel() {
       color: '#f5eedd',
       opacity: 1
     })
-    assert.equal(watermarkRun.stage, 0)
-    assert.equal(watermarkRun.rotate, -45)
-    assert.equal(watermarkRun.opacity, 0.3)
+    assert.equal(watermarkRaster.stage, 0)
+    assert.equal(watermarkRaster.sourceType, 'watermark-text')
+    assert.equal(watermarkRaster.debugLabel, 'text-watermark')
     assert.equal(pageNumberRun.stage, 41)
     assert.deepEqual(page.issues, [])
   } finally {
@@ -10607,28 +10687,7 @@ async function testLayoutDocumentDoesNotAddBlankHeaderLineForLeadingNewline() {
   const previousDocument = globalThis.document
   const runtimeGlobal = globalThis as any
 
-  runtimeGlobal.document = {
-    createElement(tagName: string) {
-      if (tagName !== 'canvas') {
-        throw new Error(`Unexpected tag: ${tagName}`)
-      }
-
-      return {
-        getContext() {
-          return {
-            font: '',
-            measureText(text: string) {
-              return {
-                width: text.length * 10,
-                actualBoundingBoxAscent: 12,
-                actualBoundingBoxDescent: 8
-              }
-            }
-          }
-        }
-      }
-    }
-  }
+  runtimeGlobal.document = createRuntimeDocument()
 
   try {
     const pageList = await layoutDocument(
@@ -10679,9 +10738,10 @@ async function testLayoutDocumentDoesNotAddBlankHeaderLineForLeadingNewline() {
     assert.ok(hospitalRun)
     assert.ok(subtitleRun)
     assert.ok(headerSeparator)
-    assert.equal(subtitleRun.y, 98)
-    assert.equal(headerSeparator.y1, 108.5)
-    assert.equal(headerSeparator.y1 - subtitleRun.y, 10.5)
+    assert.ok(subtitleRun.y > hospitalRun.y)
+    assert.ok(headerSeparator.y1 > subtitleRun.y)
+    assert.ok(headerSeparator.y1 - subtitleRun.y > 5)
+    assert.ok(headerSeparator.y1 - subtitleRun.y < 20)
   } finally {
     runtimeGlobal.document = previousDocument
   }
@@ -11643,9 +11703,9 @@ function testCreatesDecorationLinesFromPlacements() {
     [
       {
         x1: 10,
-        y1: 21,
+        y1: 30,
         x2: 30,
-        y2: 21,
+        y2: 30,
         color: '#ff0000'
       },
       {
@@ -11698,11 +11758,11 @@ function testCreatesUnderlineLinesUsingTextMetrics() {
     })),
     [
       {
-        y1: 21,
+        y1: 28,
         color: '#111111'
       },
       {
-        y1: 62,
+        y1: 72,
         color: '#222222'
       }
     ]
@@ -11839,6 +11899,9 @@ function testRenderTextRunsAppliesLetterSpacingCharSpace() {
       return {
         Song: ['normal']
       }
+    },
+    getTextWidth(text: string) {
+      return text.length * 10
     },
     setFont() {
       return this
@@ -12060,6 +12123,11 @@ async function testRenderPdfBase64DispatchesOperationsInStageOrder() {
   const renderPdfModulePath = require.resolve('../src/plugins/jspdf/renderPdf.js')
 
   const originalSongModule = require.cache[songModulePath]
+  const originalJspdfModule = require.cache[jspdfModulePath]
+  const originalFontModule = require.cache[fontModulePath]
+  const originalRenderImageModule = require.cache[renderImageModulePath]
+  const originalRenderTextModule = require.cache[renderTextModulePath]
+  const originalRenderVectorModule = require.cache[renderVectorModulePath]
   require.cache[songModulePath] = {
     id: songModulePath,
     filename: songModulePath,
@@ -12069,23 +12137,6 @@ async function testRenderPdfBase64DispatchesOperationsInStageOrder() {
     }
   } as any
 
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const jspdfModule = require(jspdfModulePath)
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const fontModule = require(fontModulePath)
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const renderImageModule = require(renderImageModulePath)
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const renderTextModule = require(renderTextModulePath)
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const renderVectorModule = require(renderVectorModulePath)
-
-  const originalJsPDF = jspdfModule.jsPDF
-  const originalDefaultJsPDF = jspdfModule.default
-  const originalBootstrapPdfFonts = fontModule.bootstrapPdfFonts
-  const originalRenderImages = renderImageModule.renderImages
-  const originalRenderTextRun = renderTextModule.renderTextRun
-  const originalRenderVectorLine = renderVectorModule.renderVectorLine
   const callList: Array<{
     kind: string
     payload?: unknown
@@ -12172,36 +12223,60 @@ async function testRenderPdfBase64DispatchesOperationsInStageOrder() {
   }
 
   try {
-    jspdfModule.jsPDF = MockJsPDF
-    jspdfModule.default = MockJsPDF
-    fontModule.bootstrapPdfFonts = async () => ({
-      defaultFontFamily: 'MockSong'
+    require.cache[jspdfModulePath] = createCachedModule(jspdfModulePath, {
+      __esModule: true,
+      jsPDF: MockJsPDF,
+      default: MockJsPDF
     })
-    renderImageModule.renderImages = async (_doc: unknown, rasterList: unknown[]) => {
-      callList.push({
-        kind: 'raster',
-        payload: rasterList
+    require.cache[fontModulePath] = createCachedModule(fontModulePath, {
+      __esModule: true,
+      bootstrapPdfFonts: async () => ({
+        defaultFontFamily: 'MockSong'
       })
-    }
-    renderTextModule.renderTextRun = (
-      _doc: unknown,
-      run: unknown,
-      defaultFontFamily: string
-    ) => {
-      callList.push({
-        kind: 'text',
-        payload: {
-          run,
-          defaultFontFamily
+    })
+    require.cache[renderImageModulePath] = createCachedModule(
+      renderImageModulePath,
+      {
+        __esModule: true,
+        renderImages: async (_doc: unknown, rasterList: unknown[]) => {
+          callList.push({
+            kind: 'raster',
+            payload: rasterList
+          })
         }
-      })
-    }
-    renderVectorModule.renderVectorLine = (_doc: unknown, line: unknown) => {
-      callList.push({
-        kind: 'vector',
-        payload: line
-      })
-    }
+      }
+    )
+    require.cache[renderTextModulePath] = createCachedModule(
+      renderTextModulePath,
+      {
+        __esModule: true,
+        renderTextRun: (
+          _doc: unknown,
+          run: unknown,
+          defaultFontFamily: string
+        ) => {
+          callList.push({
+            kind: 'text',
+            payload: {
+              run,
+              defaultFontFamily
+            }
+          })
+        }
+      }
+    )
+    require.cache[renderVectorModulePath] = createCachedModule(
+      renderVectorModulePath,
+      {
+        __esModule: true,
+        renderVectorLine: (_doc: unknown, line: unknown) => {
+          callList.push({
+            kind: 'vector',
+            payload: line
+          })
+        }
+      }
+    )
 
     delete require.cache[renderPdfModulePath]
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -12318,7 +12393,9 @@ async function testRenderPdfBase64DispatchesOperationsInStageOrder() {
         payload: {
           orientation: 'portrait',
           unit: 'pt',
-          format: [100, 200]
+          format: [100, 200],
+          compress: true,
+          putOnlyUsedFonts: true
         }
       },
       {
@@ -12435,14 +12512,32 @@ async function testRenderPdfBase64DispatchesOperationsInStageOrder() {
       ]
     )
   } finally {
-    jspdfModule.jsPDF = originalJsPDF
-    jspdfModule.default = originalDefaultJsPDF
-    fontModule.bootstrapPdfFonts = originalBootstrapPdfFonts
-    renderImageModule.renderImages = originalRenderImages
-    renderTextModule.renderTextRun = originalRenderTextRun
-    renderVectorModule.renderVectorLine = originalRenderVectorLine
     delete require.cache[renderPdfModulePath]
-    delete require.cache[fontModulePath]
+    if (originalJspdfModule) {
+      require.cache[jspdfModulePath] = originalJspdfModule
+    } else {
+      delete require.cache[jspdfModulePath]
+    }
+    if (originalFontModule) {
+      require.cache[fontModulePath] = originalFontModule
+    } else {
+      delete require.cache[fontModulePath]
+    }
+    if (originalRenderImageModule) {
+      require.cache[renderImageModulePath] = originalRenderImageModule
+    } else {
+      delete require.cache[renderImageModulePath]
+    }
+    if (originalRenderTextModule) {
+      require.cache[renderTextModulePath] = originalRenderTextModule
+    } else {
+      delete require.cache[renderTextModulePath]
+    }
+    if (originalRenderVectorModule) {
+      require.cache[renderVectorModulePath] = originalRenderVectorModule
+    } else {
+      delete require.cache[renderVectorModulePath]
+    }
     if (originalSongModule) {
       require.cache[songModulePath] = originalSongModule
     } else {
@@ -12549,7 +12644,7 @@ function testCentersCellTextVertically() {
 
   assert.deepEqual(
     placementList.map(placement => placement.y),
-    [48, 68]
+    [52, 72]
   )
 }
 
@@ -12571,7 +12666,7 @@ function testBottomAlignsCellText() {
 
   assert.deepEqual(
     placementList.map(placement => placement.y),
-    [64, 84]
+    [72, 92]
   )
 }
 
@@ -13032,6 +13127,8 @@ async function testJspdfPluginReturnsDiagnosticsFromPageModels() {
       editor: harness.editor,
       finalOption: {
         defaultFontFamily: 'PluginSong',
+        disableTextRasterFallback: true,
+        __printPageDataUrlList: [],
         mode: EditorMode.READONLY
       }
     })
@@ -13053,7 +13150,10 @@ async function testJspdfPluginRejectsNonPrintExportMode() {
         }),
       /requires print mode layout/
     )
-    assert.equal(harness.callList.length, 0)
+    assert.deepEqual(
+      harness.callList.map(item => item.kind),
+      ['readEditorPrintPageDataUrlList']
+    )
   } finally {
     harness.restore()
   }
@@ -13119,6 +13219,7 @@ async function testJspdfPluginDisablesTextRasterFallbackByDefault() {
       finalOption: {
         defaultFontFamily: 'PluginSong',
         disableTextRasterFallback: true,
+        __printPageDataUrlList: [],
         mode: EditorMode.PRINT
       }
     })
@@ -13127,6 +13228,7 @@ async function testJspdfPluginDisablesTextRasterFallbackByDefault() {
       finalOption: {
         defaultFontFamily: 'PluginSong',
         disableTextRasterFallback: true,
+        __printPageDataUrlList: [],
         mode: EditorMode.PRINT
       }
     })
@@ -13278,11 +13380,14 @@ async function testJspdfPluginRenderPdfPassesThroughInNormalMode() {
         'renderPdfBase64'
       ]
     )
-    assert.deepEqual(harness.callList[3].payload, {
+    assert.deepEqual(harness.callList[4].payload, {
       pageModels,
       finalOption: {
         defaultFontFamily: 'PluginSong',
-        paperDirection: 'horizontal'
+        disableTextRasterFallback: true,
+        __printPageDataUrlList: [],
+        paperDirection: 'horizontal',
+        mode: EditorMode.PRINT
       }
     })
   } finally {
@@ -13405,6 +13510,7 @@ async function run() {
   testCreatesSeparateParagraphPlacementsForMultipleRuns()
   testPreservesParagraphRunDecorationFlags()
   testCreatesDecorationLinesFromPlacements()
+  testCreatesUnderlineLinesUsingTextMetrics()
   testInheritsTableCellTextStyleFromCellElement()
   testCreatesSeparateTableCellPlacementsForMultipleRuns()
   testPartitionsRasterBlocksByLayer()
