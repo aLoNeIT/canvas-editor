@@ -28,6 +28,62 @@ function stripPdfDataUriPrefix(dataUri: string) {
   return dataUri.slice(index + 'base64,'.length)
 }
 
+const PDF_POINT_PER_CSS_PIXEL = 72 / 96
+
+function scaleValue(value: number) {
+  return value * PDF_POINT_PER_CSS_PIXEL
+}
+
+function scaleDashArray(dash: number[] | undefined) {
+  return dash?.map(scaleValue)
+}
+
+function scalePageModel(page: IPageModel): IPageModel {
+  return {
+    ...page,
+    width: scaleValue(page.width),
+    height: scaleValue(page.height),
+    highlightRects: page.highlightRects.map(rect => ({
+      ...rect,
+      x: scaleValue(rect.x),
+      y: scaleValue(rect.y),
+      width: scaleValue(rect.width),
+      height: scaleValue(rect.height)
+    })),
+    textRuns: page.textRuns.map(run => ({
+      ...run,
+      x: scaleValue(run.x),
+      y: scaleValue(run.y),
+      width: scaleValue(run.width),
+      height: scaleValue(run.height)
+    })),
+    vectorLines: page.vectorLines.map(line => ({
+      ...line,
+      x1: scaleValue(line.x1),
+      y1: scaleValue(line.y1),
+      x2: scaleValue(line.x2),
+      y2: scaleValue(line.y2),
+      width: typeof line.width === 'number' ? scaleValue(line.width) : line.width,
+      dash: scaleDashArray(line.dash)
+    })),
+    links: page.links.map(link => ({
+      ...link,
+      x: scaleValue(link.x),
+      y: scaleValue(link.y),
+      width: scaleValue(link.width),
+      height: scaleValue(link.height)
+    })),
+    rasterBlocks: page.rasterBlocks.map(raster => ({
+      ...raster,
+      x: scaleValue(raster.x),
+      y: scaleValue(raster.y),
+      width: scaleValue(raster.width),
+      height: scaleValue(raster.height),
+      crop: raster.crop
+    }))
+  }
+}
+
 export async function renderPdfBase64(
   pageModels: IPageModel[],
   options: IRenderPdfOption = {}
@@ -36,7 +92,8 @@ export async function renderPdfBase64(
     throw new Error('PDF export failed: no page models were provided')
   }
 
-  const first = pageModels[0]
+  const pdfPageModels = pageModels.map(scalePageModel)
+  const first = pdfPageModels[0]
   const orientation = resolveOrientation(
     options.paperDirection,
     first.width,
@@ -88,7 +145,12 @@ export async function renderPdfBase64(
       }
 
       if (operation.kind === 'text') {
-        renderTextRun(doc, operation.item, defaultFontFamily)
+        renderTextRun(
+          doc,
+          operation.item,
+          defaultFontFamily,
+          PDF_POINT_PER_CSS_PIXEL
+        )
         continue
       }
 
@@ -111,8 +173,8 @@ export async function renderPdfBase64(
 
   await renderPage(first)
 
-  for (let i = 1; i < pageModels.length; i++) {
-    const page = pageModels[i]
+  for (let i = 1; i < pdfPageModels.length; i++) {
+    const page = pdfPageModels[i]
     const pageOrientation = resolveOrientation(
       options.paperDirection,
       page.width,

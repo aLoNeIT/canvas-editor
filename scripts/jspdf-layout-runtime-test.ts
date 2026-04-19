@@ -89,6 +89,10 @@ function roundTo3(value: number) {
   return Math.round(value * 1000) / 1000
 }
 
+function pxToPt(value: number) {
+  return roundTo3((value * 72) / 96)
+}
+
 function createRuntimeDocument() {
   return {
     createElement(tagName: string) {
@@ -722,6 +726,60 @@ function testReadEditorStateFiltersAssistElementsInPrintMode() {
       }
     ]
   )
+}
+
+function testReadEditorStateIncludesCoreLayoutSnapshot() {
+  const source = readEditorState(
+    {
+      command: {
+        getValue() {
+          return {
+            version: 'test',
+            data: {
+              header: [],
+              main: [],
+              footer: [],
+              graffiti: []
+            },
+            options: {}
+          }
+        },
+        getOptions() {
+          return {
+            width: 794,
+            height: 1123,
+            margins: [100, 120, 100, 120]
+          }
+        },
+        getLayoutSnapshot() {
+          return {
+            pageRowList: [[{ rowIndex: 0 }]],
+            headerRowList: [{ rowIndex: 0 }],
+            footerRowList: [{ rowIndex: 0 }],
+            headerExtraHeight: 18,
+            footerExtraHeight: 22,
+            mainOuterHeight: 240,
+            pageCount: 1,
+            iframeInfoList: []
+          }
+        }
+      }
+    } as any,
+    {
+      mode: EditorMode.PRINT
+    } as any
+  )
+
+  assert.deepEqual(source.coreLayout, {
+    pageRowList: [[{ rowIndex: 0 }]],
+    headerRowList: [{ rowIndex: 0 }],
+    footerRowList: [{ rowIndex: 0 }],
+    headerExtraHeight: 18,
+    footerExtraHeight: 22,
+    mainOuterHeight: 240,
+    pageCount: 1,
+    iframeInfoList: []
+  })
 }
 
 function testExpandsTableRowHeightForWrappedCellText() {
@@ -5958,6 +6016,216 @@ async function testLayoutDocumentAppendsGraffitiStrokes() {
     ]
   )
   assert.deepEqual(pageList[0].issues, [])
+}
+
+async function testLayoutDocumentUsesCorePrintPageSnapshotsWhenAvailable() {
+  const option = createRuntimeSourceOptions()
+  const pageList = await layoutDocument({
+    width: option.width,
+    height: option.height,
+    margins: option.margins,
+    scale: option.scale,
+    printPageDataUrlList: [
+      'data:image/png;base64,core-page-1',
+      'data:image/png;base64,core-page-2'
+    ],
+    coreLayout: {
+      pageRowList: [[{ rowIndex: 0 }], [{ rowIndex: 1 }]],
+      headerRowList: [],
+      footerRowList: [],
+      headerExtraHeight: 0,
+      footerExtraHeight: 0,
+      mainOuterHeight: 0,
+      pageCount: 2,
+      iframeInfoList: []
+    },
+    defaults: {
+      defaultFont: option.defaultFont,
+      defaultSize: option.defaultSize,
+      defaultColor: option.defaultColor,
+      defaultRowMargin: option.defaultRowMargin,
+      defaultBasicRowMarginHeight: option.defaultBasicRowMarginHeight,
+      header: option.header,
+      footer: option.footer,
+      backgroundColor: option.background.color,
+      backgroundImage: option.background.image,
+      backgroundSize: option.background.size,
+      backgroundRepeat: option.background.repeat,
+      backgroundApplyPageNumbers: option.background.applyPageNumbers,
+      listInheritStyle: option.list.inheritStyle,
+      labelDefaultColor: option.label.defaultColor,
+      labelDefaultBackgroundColor: option.label.defaultBackgroundColor,
+      labelDefaultBorderRadius: option.label.defaultBorderRadius,
+      labelDefaultPadding: option.label.defaultPadding,
+      imgCaption: option.imgCaption,
+      pageNumber: option.pageNumber,
+      watermark: option.watermark,
+      pageBorder: option.pageBorder,
+      lineNumber: option.lineNumber,
+      titleSizeMapping: {
+        [TitleLevel.FIRST]: option.title.defaultFirstSize,
+        [TitleLevel.SECOND]: option.title.defaultSecondSize,
+        [TitleLevel.THIRD]: option.title.defaultThirdSize,
+        [TitleLevel.FOURTH]: option.title.defaultFourthSize,
+        [TitleLevel.FIFTH]: option.title.defaultFifthSize,
+        [TitleLevel.SIXTH]: option.title.defaultSixthSize
+      }
+    },
+    header: {
+      key: 'header',
+      elementList: [],
+      blockList: [],
+      height: 0
+    },
+    main: {
+      key: 'main',
+      elementList: [],
+      blockList: [],
+      height: 0
+    },
+    footer: {
+      key: 'footer',
+      elementList: [],
+      blockList: [],
+      height: 0
+    },
+    graffiti: []
+  } as any)
+
+  assert.equal(pageList.length, 2)
+  assert.deepEqual(
+    pageList.map(page => ({
+      pageNo: page.pageNo,
+      textRunCount: page.textRuns.length,
+      vectorLineCount: page.vectorLines.length,
+      highlightCount: page.highlightRects.length,
+      issues: page.issues,
+      rasterBlocks: page.rasterBlocks.map(block => ({
+        x: block.x,
+        y: block.y,
+        width: block.width,
+        height: block.height,
+        dataUrl: block.dataUrl,
+        sourceType: block.sourceType,
+        stage: block.stage,
+        debugLabel: block.debugLabel
+      }))
+    })),
+    [
+      {
+        pageNo: 0,
+        textRunCount: 0,
+        vectorLineCount: 0,
+        highlightCount: 0,
+        issues: [],
+        rasterBlocks: [
+          {
+            x: 0,
+            y: 0,
+            width: option.width,
+            height: option.height,
+            dataUrl: 'data:image/png;base64,core-page-1',
+            sourceType: 'image',
+            stage: PDF_RENDER_STAGE.BACKGROUND,
+            debugLabel: 'core-print-page'
+          }
+        ]
+      },
+      {
+        pageNo: 1,
+        textRunCount: 0,
+        vectorLineCount: 0,
+        highlightCount: 0,
+        issues: [],
+        rasterBlocks: [
+          {
+            x: 0,
+            y: 0,
+            width: option.width,
+            height: option.height,
+            dataUrl: 'data:image/png;base64,core-page-2',
+            sourceType: 'image',
+            stage: PDF_RENDER_STAGE.BACKGROUND,
+            debugLabel: 'core-print-page'
+          }
+        ]
+      }
+    ]
+  )
+}
+
+async function testLayoutDocumentKeepsIframeWarningForCoreSnapshotPages() {
+  const option = createRuntimeSourceOptions()
+  const pageList = await layoutDocument({
+    width: option.width,
+    height: option.height,
+    margins: option.margins,
+    scale: option.scale,
+    printPageDataUrlList: ['data:image/png;base64,core-page-1'],
+    coreLayout: {
+      pageRowList: [[{ rowIndex: 0 }]],
+      headerRowList: [],
+      footerRowList: [],
+      headerExtraHeight: 0,
+      footerExtraHeight: 0,
+      mainOuterHeight: 0,
+      pageCount: 1,
+      iframeInfoList: [[{ x: 10, y: 12, width: 30, height: 20 }]]
+    },
+    defaults: {
+      defaultFont: option.defaultFont,
+      defaultSize: option.defaultSize,
+      defaultColor: option.defaultColor,
+      defaultRowMargin: option.defaultRowMargin,
+      defaultBasicRowMarginHeight: option.defaultBasicRowMarginHeight,
+      header: option.header,
+      footer: option.footer,
+      backgroundColor: option.background.color,
+      backgroundImage: option.background.image,
+      backgroundSize: option.background.size,
+      backgroundRepeat: option.background.repeat,
+      backgroundApplyPageNumbers: option.background.applyPageNumbers,
+      listInheritStyle: option.list.inheritStyle,
+      labelDefaultColor: option.label.defaultColor,
+      labelDefaultBackgroundColor: option.label.defaultBackgroundColor,
+      labelDefaultBorderRadius: option.label.defaultBorderRadius,
+      labelDefaultPadding: option.label.defaultPadding,
+      imgCaption: option.imgCaption,
+      pageNumber: option.pageNumber,
+      watermark: option.watermark,
+      pageBorder: option.pageBorder,
+      lineNumber: option.lineNumber,
+      titleSizeMapping: {
+        [TitleLevel.FIRST]: option.title.defaultFirstSize,
+        [TitleLevel.SECOND]: option.title.defaultSecondSize,
+        [TitleLevel.THIRD]: option.title.defaultThirdSize,
+        [TitleLevel.FOURTH]: option.title.defaultFourthSize,
+        [TitleLevel.FIFTH]: option.title.defaultFifthSize,
+        [TitleLevel.SIXTH]: option.title.defaultSixthSize
+      }
+    },
+    header: {
+      key: 'header',
+      elementList: [],
+      blockList: [],
+      height: 0
+    },
+    main: {
+      key: 'main',
+      elementList: [],
+      blockList: [],
+      height: 0
+    },
+    footer: {
+      key: 'footer',
+      elementList: [],
+      blockList: [],
+      height: 0
+    },
+    graffiti: []
+  } as any)
+
+  assert.deepEqual(pageList[0].issues, ['pending:block-iframe'])
 }
 
 async function testLayoutDocumentBreaksPageOnPageBreakElement() {
@@ -11889,6 +12157,7 @@ function testResolvesPdfBoldItalicFontStyle() {
 
 function testRenderTextRunsAppliesLetterSpacingCharSpace() {
   const charSpaceList: number[] = []
+  const fontSizeList: number[] = []
   const textCallList: Array<{
     text: string
     x: number
@@ -11906,7 +12175,8 @@ function testRenderTextRunsAppliesLetterSpacingCharSpace() {
     setFont() {
       return this
     },
-    setFontSize() {
+    setFontSize(value: number) {
+      fontSizeList.push(value)
       return this
     },
     setTextColor() {
@@ -11955,12 +12225,106 @@ function testRenderTextRunsAppliesLetterSpacingCharSpace() {
     'Song'
   )
 
+  assert.deepEqual(fontSizeList, [12])
   assert.deepEqual(charSpaceList, [5, 0])
   assert.deepEqual(textCallList, [
     {
       text: 'ab',
       x: 10,
       y: 20
+    }
+  ])
+}
+
+function testRenderTextRunsScalesPdfMetrics() {
+  const charSpaceList: number[] = []
+  const fontSizeList: number[] = []
+  const textCallList: Array<{
+    text: string
+    x: number
+    y: number
+    option?: Record<string, unknown>
+  }> = []
+  const doc = {
+    getFontList() {
+      return {
+        Song: ['normal']
+      }
+    },
+    getTextWidth(text: string) {
+      return text.length * 10
+    },
+    setFont() {
+      return this
+    },
+    setFontSize(value: number) {
+      fontSizeList.push(roundTo3(value))
+      return this
+    },
+    setTextColor() {
+      return this
+    },
+    setCharSpace(value: number) {
+      charSpaceList.push(roundTo3(value))
+      return this
+    },
+    text(
+      text: string,
+      x: number,
+      y: number,
+      option?: Record<string, unknown>
+    ) {
+      textCallList.push({
+        text,
+        x,
+        y,
+        option
+      })
+      return this
+    }
+  }
+
+  renderTextRuns(
+    doc as any,
+    {
+      pageNo: 0,
+      width: 100,
+      height: 100,
+      textRuns: [
+        {
+          pageNo: 0,
+          text: 'ab',
+          x: 10,
+          y: 20,
+          width: 30,
+          height: 20,
+          font: 'Song',
+          size: 12,
+          color: '#000000',
+          letterSpacing: 5
+        }
+      ],
+      highlightRects: [],
+      links: [],
+      vectorLines: [],
+      rasterBlocks: [],
+      issues: []
+    },
+    'Song',
+    72 / 96
+  )
+
+  assert.deepEqual(fontSizeList, [9])
+  assert.deepEqual(charSpaceList, [3.75, 0])
+  assert.deepEqual(textCallList, [
+    {
+      text: 'ab',
+      x: 10,
+      y: 20,
+      option: {
+        angle: 0,
+        horizontalScale: 2.25
+      }
     }
   ])
 }
@@ -12393,7 +12757,7 @@ async function testRenderPdfBase64DispatchesOperationsInStageOrder() {
         payload: {
           orientation: 'portrait',
           unit: 'pt',
-          format: [100, 200],
+          format: [pxToPt(100), pxToPt(200)],
           compress: true,
           putOnlyUsedFonts: true
         }
@@ -12411,10 +12775,10 @@ async function testRenderPdfBase64DispatchesOperationsInStageOrder() {
       {
         kind: 'rect',
         payload: {
-          x: 1,
-          y: 2,
-          width: 3,
-          height: 4,
+          x: pxToPt(1),
+          y: pxToPt(2),
+          width: pxToPt(3),
+          height: pxToPt(4),
           mode: 'F'
         }
       },
@@ -12430,10 +12794,10 @@ async function testRenderPdfBase64DispatchesOperationsInStageOrder() {
           {
             pageNo: 0,
             stage: 20,
-            x: 10,
-            y: 20,
-            width: 30,
-            height: 40,
+            x: pxToPt(10),
+            y: pxToPt(20),
+            width: pxToPt(30),
+            height: pxToPt(40),
             dataUrl: 'image-1'
           }
         ]
@@ -12445,10 +12809,10 @@ async function testRenderPdfBase64DispatchesOperationsInStageOrder() {
             pageNo: 0,
             stage: 30,
             text: 'Hello',
-            x: 11,
-            y: 22,
-            width: 50,
-            height: 20,
+            x: pxToPt(11),
+            y: pxToPt(22),
+            width: pxToPt(50),
+            height: pxToPt(20),
             font: 'Song',
             size: 12,
             color: '#000000'
@@ -12461,20 +12825,20 @@ async function testRenderPdfBase64DispatchesOperationsInStageOrder() {
         payload: {
           pageNo: 0,
           stage: 40,
-          x1: 5,
-          y1: 6,
-          x2: 7,
-          y2: 8,
+          x1: pxToPt(5),
+          y1: pxToPt(6),
+          x2: pxToPt(7),
+          y2: pxToPt(8),
           color: '#123456'
         }
       },
       {
         kind: 'link',
         payload: {
-          x: 9,
-          y: 10,
-          width: 11,
-          height: 12,
+          x: pxToPt(9),
+          y: pxToPt(10),
+          width: pxToPt(11),
+          height: pxToPt(12),
           option: {
             url: 'https://example.com'
           }
@@ -12483,7 +12847,7 @@ async function testRenderPdfBase64DispatchesOperationsInStageOrder() {
       {
         kind: 'addPage',
         payload: {
-          format: [220, 120],
+          format: [pxToPt(220), pxToPt(120)],
           orientation: 'landscape'
         }
       },
@@ -12494,10 +12858,10 @@ async function testRenderPdfBase64DispatchesOperationsInStageOrder() {
             pageNo: 1,
             stage: 30,
             text: 'P2',
-            x: 15,
-            y: 25,
-            width: 20,
-            height: 20,
+            x: pxToPt(15),
+            y: pxToPt(25),
+            width: pxToPt(20),
+            height: pxToPt(20),
             font: 'Song',
             size: 12,
             color: '#111111'
@@ -13237,6 +13601,53 @@ async function testJspdfPluginDisablesTextRasterFallbackByDefault() {
   }
 }
 
+async function testJspdfPluginPassesCoreLayoutToNormalizeDocument() {
+  const harness = createJspdfPluginCommandHarness({
+    source: {
+      result: {
+        data: {
+          header: [],
+          main: [],
+          footer: [],
+          graffiti: []
+        }
+      },
+      options: {
+        width: 794,
+        height: 1123,
+        margins: [100, 120, 100, 120]
+      },
+      exportOptions: {
+        mode: EditorMode.PRINT
+      },
+      badge: {
+        main: null,
+        areas: []
+      },
+      coreLayout: {
+        pageRowList: [[{ rowIndex: 0 }]],
+        headerRowList: [],
+        footerRowList: [],
+        headerExtraHeight: 0,
+        footerExtraHeight: 0,
+        mainOuterHeight: 200,
+        pageCount: 1,
+        iframeInfoList: []
+      }
+    },
+    pageModels: [createJspdfPageModel({ pageNo: 0 })]
+  })
+
+  try {
+    harness.jspdfPlugin(harness.editor as any)
+    await (harness.editor.command as any).executeExportPdfBase64()
+
+    assert.equal((harness.callList[2].payload as any).coreLayout.pageCount, 1)
+  } finally {
+    harness.restore()
+  }
+}
+
 async function testJspdfPluginDebugRejectsFallbackBlocks() {
   const harness = createJspdfPluginCommandHarness({
     pageModels: [
@@ -13397,6 +13808,7 @@ async function testJspdfPluginRenderPdfPassesThroughInNormalMode() {
 
 async function run() {
   testReadEditorStateFiltersAssistElementsInPrintMode()
+  testReadEditorStateIncludesCoreLayoutSnapshot()
   await testBootstrapPdfFontsRegistersAllTextStyles()
   await testRegisterPdfFontStylesSupportsPerStyleFontFiles()
   testWrapsLongTextByWidth()
@@ -13454,6 +13866,8 @@ async function run() {
   await testLayoutDocumentAppendsAreaDecorations()
   await testLayoutDocumentAppendsMainAndAreaBadges()
   await testLayoutDocumentAppendsGraffitiStrokes()
+  await testLayoutDocumentUsesCorePrintPageSnapshotsWhenAvailable()
+  await testLayoutDocumentKeepsIframeWarningForCoreSnapshotPages()
   await testLayoutDocumentBreaksPageOnPageBreakElement()
   await testLayoutDocumentRendersTableInsideAreaWrapper()
   await testLayoutDocumentRendersImageCaptionAndReservesHeight()
@@ -13536,12 +13950,14 @@ async function run() {
   await testJspdfPluginRejectsNonPrintExportMode()
   await testJspdfPluginRejectsMissingPageModels()
   await testJspdfPluginDisablesTextRasterFallbackByDefault()
+  await testJspdfPluginPassesCoreLayoutToNormalizeDocument()
   await testJspdfPluginDebugRejectsFallbackBlocks()
   await testJspdfPluginDebugRejectsLayoutWarnings()
   await testJspdfPluginDebugRejectsEmptyRenderedPage()
   await testJspdfPluginRenderPdfPassesThroughInNormalMode()
   testResolvesPdfBoldItalicFontStyle()
   testRenderTextRunsAppliesLetterSpacingCharSpace()
+  testRenderTextRunsScalesPdfMetrics()
   testRenderVectorLineAppliesDashAndResetsSolidStroke()
   testRenderVectorLinesRendersWholePageVectorList()
   await testRenderPdfBase64DispatchesOperationsInStageOrder()
