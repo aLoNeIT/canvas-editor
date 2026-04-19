@@ -7,7 +7,8 @@ import { resolvePdfTextFontStyle } from './fontStyle'
 export function renderTextRun(
   doc: jsPDF,
   run: IPdfTextRun,
-  defaultFontFamily: string
+  defaultFontFamily: string,
+  metricsScale = 1
 ) {
   const gStateCtor = (doc as any).GState
   if (
@@ -21,17 +22,18 @@ export function renderTextRun(
     resolvePdfFontFamily(doc, run.font, defaultFontFamily),
     resolvePdfTextFontStyle(run)
   )
-  doc.setFontSize(run.size)
+  doc.setFontSize(run.size * metricsScale)
   doc.setTextColor(run.color || '#000000')
   const pdfTextWidth = doc.getTextWidth(run.text)
-  const spacingWidth = (run.letterSpacing || 0) * run.text.length
+  const letterSpacing = (run.letterSpacing || 0) * metricsScale
+  const spacingWidth = letterSpacing * run.text.length
   const effectiveRunWidth = Math.max(0, run.width - spacingWidth)
   const horizontalScale =
     effectiveRunWidth > 0 && pdfTextWidth > 0
       ? effectiveRunWidth / pdfTextWidth
       : undefined
   if (typeof doc.setCharSpace === 'function') {
-    doc.setCharSpace(run.letterSpacing || 0)
+    doc.setCharSpace(letterSpacing)
   }
   doc.text(run.text, run.x, run.y, {
     angle: run.rotate || 0,
@@ -52,9 +54,10 @@ export function renderTextRun(
 export function renderTextRuns(
   doc: jsPDF,
   page: IPageModel,
-  defaultFontFamily: string
+  defaultFontFamily: string,
+  metricsScale = 1
 ) {
   page.textRuns.forEach(run => {
-    renderTextRun(doc, run, defaultFontFamily)
+    renderTextRun(doc, run, defaultFontFamily, metricsScale)
   })
 }

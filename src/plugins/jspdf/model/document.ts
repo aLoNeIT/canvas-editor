@@ -160,6 +160,17 @@ export interface IDocumentBadgeState {
   areas: IAreaBadge[]
 }
 
+export interface IDocumentCoreLayoutSnapshot {
+  pageRowList: any[]
+  headerRowList: any[]
+  footerRowList: any[]
+  headerExtraHeight: number
+  footerExtraHeight: number
+  mainOuterHeight: number
+  pageCount: number
+  iframeInfoList: any[]
+}
+
 export interface IDocumentModel {
   width: number
   height: number
@@ -167,6 +178,7 @@ export interface IDocumentModel {
   scale: number
   printPageDataUrlList?: string[]
   disableTextRasterFallback?: boolean
+  coreLayout?: IDocumentCoreLayoutSnapshot | null
   defaults: IDocumentLayoutDefaults
   badge?: IDocumentBadgeState
   header: IZoneModel

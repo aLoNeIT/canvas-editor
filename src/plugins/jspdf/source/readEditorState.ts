@@ -14,6 +14,18 @@ export interface IJspdfSourceState {
   options: DeepRequired<IEditorOption>
   exportOptions: IJspdfExportOption
   badge: IJspdfBadgeStateSnapshot
+  coreLayout: IJspdfCoreLayoutSnapshot | null
+}
+
+export interface IJspdfCoreLayoutSnapshot {
+  pageRowList: any[]
+  headerRowList: any[]
+  footerRowList: any[]
+  headerExtraHeight: number
+  footerExtraHeight: number
+  mainOuterHeight: number
+  pageCount: number
+  iframeInfoList: any[]
 }
 
 export async function readEditorPrintPageDataUrlList(
@@ -110,6 +122,11 @@ export function readEditorState(
 ): IJspdfSourceState {
   const result = editor.command.getValue()
   const mode = exportOptions.mode || EditorMode.PRINT
+  const coreLayout =
+    mode === EditorMode.PRINT &&
+    typeof (editor.command as any).getLayoutSnapshot === 'function'
+      ? ((editor.command as any).getLayoutSnapshot() as IJspdfCoreLayoutSnapshot)
+      : null
 
   return {
     result:
@@ -118,6 +135,7 @@ export function readEditorState(
         : result,
     options: editor.command.getOptions(),
     exportOptions,
-    badge: getBadgeStateSnapshot(editor)
+    badge: getBadgeStateSnapshot(editor),
+    coreLayout
   }
 }
