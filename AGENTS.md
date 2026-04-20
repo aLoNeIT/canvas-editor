@@ -162,6 +162,19 @@ src/
 - Extend Editor functionality without modifying core
 - Follow established plugin patterns in codebase
 
+### jsPDF Plugin Guidance
+- Source of truth is the implementation under `src/plugins/jspdf/`, especially `index.ts`, `source/readEditorState.ts`, `layout/layoutDocument.ts`, and `renderPdf.ts`.
+- Do not assume older docs are correct when they conflict with code. Some existing guide pages still describe the jsPDF plugin as a fully independent layout engine.
+- Current stable export behavior is core-print-result driven:
+  - `readEditorPrintPageDataUrlList()` reads core print page images.
+  - `readEditorState()` reads `getLayoutSnapshot()` when available in `PRINT` mode.
+  - `layoutDocument()` short-circuits to full-page core snapshots when print page data is available.
+- Preserve this direction by default. Do not reintroduce a plugin-owned full pagination path for normal print export work unless the user explicitly asks for that architecture.
+- `executeExportPdfBase64(payload?)` only supports `EditorMode.PRINT`. Passing another mode is an error by design.
+- The command boundary is on `editor.command` after `editor.use(jspdfPlugin, options)`. Prefer documenting and testing from `(editor.command as CommandWithJspdf).executeExportPdfBase64(...)`.
+- PDF paper size comes from the page model size and is converted from CSS pixels to jsPDF points in `renderPdf.ts`. If paper size looks wrong, inspect the page model and upstream core print snapshot first.
+- For plugin-only tasks, prefer changing the plugin and its documentation before touching core print code. Touch core only when the requested outcome cannot be achieved from the existing plugin boundary or the user explicitly asks for core changes.
+
 ## Development Workflow
 
 1. **Start development**: `npm run dev`
