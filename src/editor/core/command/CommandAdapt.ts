@@ -1519,6 +1519,22 @@ export class CommandAdapt {
     return remaining > 0 ? remaining : 0
   }
 
+  public getLayoutSnapshot() {
+    const header = this.draw.getHeader()
+    const footer = this.draw.getFooter()
+
+    return {
+      pageRowList: this.draw.getPageRowList(),
+      headerRowList: header.getRowList(),
+      footerRowList: footer.getRowList(),
+      headerExtraHeight: header.getExtraHeight(),
+      footerExtraHeight: footer.getExtraHeight(),
+      mainOuterHeight: this.draw.getMainOuterHeight(),
+      pageCount: this.draw.getPageCount(),
+      iframeInfoList: this.draw.getBlockParticle().pickIframeInfo()
+    }
+  }
+
   public computeElementListHeight(elementList: IElement[]): number {
     if (!elementList.length) return 0
     const innerWidth = this.draw.getInnerWidth()

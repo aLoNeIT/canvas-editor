@@ -3267,6 +3267,31 @@ function resolveDocumentZoneHeights(documentModel: IDocumentModel) {
     documentModel.width - documentModel.margins[1] - documentModel.margins[3]
   const headerDisabled = documentModel.defaults.header?.disabled ?? false
   const footerDisabled = documentModel.defaults.footer?.disabled ?? false
+  const coreLayout = documentModel.coreLayout
+  const resolvedHeaderHeight = headerDisabled
+    ? 0
+    : coreLayout?.headerRowList?.length
+      ? Math.max(
+          0,
+          documentModel.margins[0] - (documentModel.defaults.header?.top ?? 0)
+        ) + (coreLayout.headerExtraHeight || 0)
+      : measureStaticZoneHeight(
+          documentModel,
+          documentModel.header.blockList,
+          contentWidth
+        )
+  const resolvedFooterHeight = footerDisabled
+    ? 0
+    : coreLayout?.footerRowList?.length
+      ? Math.max(
+          0,
+          documentModel.margins[2] - (documentModel.defaults.footer?.bottom ?? 0)
+        ) + (coreLayout.footerExtraHeight || 0)
+      : measureStaticZoneHeight(
+          documentModel,
+          documentModel.footer.blockList,
+          contentWidth
+        )
 
   return {
     contentWidth,
@@ -3274,26 +3299,64 @@ function resolveDocumentZoneHeights(documentModel: IDocumentModel) {
       ...documentModel,
       header: {
         ...documentModel.header,
-        height: headerDisabled
-          ? 0
-          : measureStaticZoneHeight(
-              documentModel,
-              documentModel.header.blockList,
-              contentWidth
-            )
+        height: resolvedHeaderHeight
       },
       footer: {
         ...documentModel.footer,
-        height: footerDisabled
-          ? 0
-          : measureStaticZoneHeight(
-              documentModel,
-              documentModel.footer.blockList,
-              contentWidth
-            )
+        height: resolvedFooterHeight
       }
     }
   }
+}
+
+function resolveCorePageCount(documentModel: IDocumentModel) {
+  const corePageRowList = documentModel.coreLayout?.pageRowList
+  return corePageRowList?.length || documentModel.coreLayout?.pageCount || 0
+}
+
+function hasCoreLayoutContent(documentModel: IDocumentModel, pageNo: number) {
+  const core = documentModel.coreLayout
+  if (!core) return false
+
+  return Boolean(
+    core.pageRowList?.[pageNo]?.length ||
+    core.headerRowList?.length ||
+    core.footerRowList?.length
+  )
+}
+
+function hasCorePrintPageSnapshot(documentModel: IDocumentModel) {
+  return Boolean(
+    documentModel.printPageDataUrlList?.length &&
+    resolveCorePageCount(documentModel)
+  )
+}
+
+function createCoreSnapshotPage(
+  pageNo: number,
+  documentModel: IDocumentModel
+) {
+  const page = createPage(pageNo, documentModel)
+  const dataUrl = documentModel.printPageDataUrlList?.[pageNo]
+  if (dataUrl) {
+    page.rasterBlocks.push({
+      pageNo,
+      stage: PDF_RENDER_STAGE.BACKGROUND,
+      x: 0,
+      y: 0,
+      width: documentModel.width,
+      height: documentModel.height,
+      dataUrl,
+      layer: 'background',
+      sourceType: 'image',
+      debugLabel: 'core-print-page'
+    })
+  }
+  if (documentModel.coreLayout?.iframeInfoList?.[pageNo]?.length) {
+    page.issues.push('pending:block-iframe')
+  }
+  appendGraffiti(page, documentModel)
+  return page
 }
 
 export async function layoutDocument(
@@ -3302,6 +3365,12 @@ export async function layoutDocument(
   const resolved = resolveDocumentZoneHeights(documentModel)
   const contentWidth = resolved.contentWidth
   const resolvedDocumentModel = resolved.documentModel
+  if (hasCorePrintPageSnapshot(resolvedDocumentModel)) {
+    const corePageCount = resolveCorePageCount(resolvedDocumentModel)
+    return Array.from({ length: corePageCount }, (_, pageNo) =>
+      createCoreSnapshotPage(pageNo, resolvedDocumentModel)
+    )
+  }
   const headerDisabled = resolvedDocumentModel.defaults.header?.disabled ?? false
   const footerDisabled = resolvedDocumentModel.defaults.footer?.disabled ?? false
   const lineNumberDisabled =
@@ -3321,10 +3390,12 @@ export async function layoutDocument(
     contentWidth
   )
 
-  const pageCount = getRequiredPageCount(
+  const computedPageCount = getRequiredPageCount(
     resolvedDocumentModel,
     placementIndexes.length
   )
+  const corePageCount = resolveCorePageCount(resolvedDocumentModel)
+  const pageCount = Math.max(corePageCount, computedPageCount || 0, 1)
   const pageList: IPageModel[] = []
   const imageNumberMap = new Map<IDocumentBlockNode, number>()
   let imageNo = 1
@@ -3490,7 +3561,8 @@ export async function layoutDocument(
       !page.textRuns.length &&
       !page.highlightRects.length &&
       !page.vectorLines.length &&
-      !page.rasterBlocks.length
+      !page.rasterBlocks.length &&
+      !hasCoreLayoutContent(resolvedDocumentModel, pageNo)
     ) {
       page.issues.push('layout:empty-page')
     }
@@ -3505,6 +3577,26 @@ export function collectLayoutDebugSummary(documentModel: IDocumentModel) {
   const resolved = resolveDocumentZoneHeights(documentModel)
   const contentWidth = resolved.contentWidth
   const resolvedDocumentModel = resolved.documentModel
+  if (hasCorePrintPageSnapshot(resolvedDocumentModel)) {
+    const pageCount = resolveCorePageCount(resolvedDocumentModel)
+    return {
+      placementCount: 0,
+      blockSummaryList: [],
+      pagePlacementSummary: Array.from({ length: pageCount }, (_, pageNo) => ({
+        pageNo,
+        placementCount: 0,
+        consumedHeight: 0,
+        cursorYEnd: 0,
+        blockIndexList: [],
+        placementSummaryList: [],
+        blockList: [],
+        isCoreSnapshotPage: true,
+        hasPrintPageDataUrl: Boolean(
+          resolvedDocumentModel.printPageDataUrlList?.[pageNo]
+        )
+      }))
+    }
+  }
   const frame = layoutFrame(resolvedDocumentModel)
   const mainPageHeight = Math.max(1, frame.mainBottom - frame.mainTop)
   const placements = collectMainPlacements(

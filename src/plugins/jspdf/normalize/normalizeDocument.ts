@@ -444,6 +444,11 @@ export function normalizeDocument(source: IJspdfSourceState): IDocumentModel {
     scale: source.options.scale,
     printPageDataUrlList: exportOptions.__printPageDataUrlList,
     disableTextRasterFallback: exportOptions.disableTextRasterFallback ?? true,
+    coreLayout: source.coreLayout
+      ? {
+          ...source.coreLayout
+        }
+      : null,
     badge: {
       top: source.options.badge.top,
       left: source.options.badge.left,
