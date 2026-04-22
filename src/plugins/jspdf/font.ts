@@ -1,0 +1,181 @@
+import type jsPDF from 'jspdf'
+import { SONG_TTF_URL } from './assets/song'
+import {
+  registerPdfFontStyles,
+  type TPdfFontFileMap
+} from './fontRegistration'
+import { resolvePdfFontFamily } from './render/fontFamily'
+
+export interface IFontBootstrapOption {
+  fonts?: Record<string, TPdfFontFileMap>
+  defaultFontFamily?: string
+  debug?: boolean
+}
+
+const urlToBase64Cache = new Map<string, Promise<string>>()
+function warn(debug: boolean | undefined, message: string, error?: unknown) {
+  if (!debug) return
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn(message, error)
+    return
+  }
+  // eslint-disable-next-line no-console
+  console.warn(message)
+}
+
+function toVfsFilename(fontFamily: string) {
+  const safe = fontFamily.trim().replace(/[^\w.-]+/g, '_')
+  return `${safe || 'font'}.ttf`
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const g = globalThis as any
+  const bytes = new Uint8Array(buffer)
+
+  if (g?.Buffer) {
+    return g.Buffer.from(bytes).toString('base64')
+  }
+
+  if (typeof g?.btoa !== 'function') {
+    throw new Error('Base64 encoding is not available in this environment')
+  }
+
+  const chunkSize = 0x8000
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize)
+    let chunkBinary = ''
+    for (let j = 0; j < chunk.length; j++) {
+      chunkBinary += String.fromCharCode(chunk[j])
+    }
+    binary += chunkBinary
+  }
+  return g.btoa(binary)
+}
+
+async function loadUrlAsBase64(url: string) {
+  const cached = urlToBase64Cache.get(url)
+  if (cached) return cached
+
+  const promise = (async () => {
+    const res = await fetch(url)
+    if (!res.ok) {
+      throw new Error(`Failed to fetch font: ${res.status} ${res.statusText}`)
+    }
+    const buf = await res.arrayBuffer()
+    return arrayBufferToBase64(buf)
+  })()
+
+  urlToBase64Cache.set(url, promise)
+  return promise
+}
+
+async function registerSongFallback(doc: jsPDF, debug?: boolean) {
+  const marker = '__canvasEditorSongFontRegistered'
+  if ((doc as any)[marker]) return
+
+  try {
+    if (!SONG_TTF_URL) return
+    const filename = 'Song.ttf'
+    if (!doc.existsFileInVFS(filename)) {
+      const base64 = await loadUrlAsBase64(SONG_TTF_URL)
+      doc.addFileToVFS(filename, base64)
+    }
+    registerPdfFontStyles(doc, filename, 'Song')
+    ;(doc as any)[marker] = true
+  } catch (e) {
+    warn(debug, 'Failed to register Song fallback font', e)
+  }
+}
+
+async function registerFontFromUrl(
+  doc: jsPDF,
+  fontFamily: string,
+  fontFileMap: TPdfFontFileMap,
+  debug?: boolean
+) {
+  try {
+    const fileMap =
+      typeof fontFileMap === 'string'
+        ? {
+            normal: fontFileMap
+          }
+        : fontFileMap
+
+    const resolvedFilenameByStyle: Partial<Record<string, string>> = {}
+
+    for (const [style, url] of Object.entries(fileMap)) {
+      if (!url) continue
+      const filename =
+        style === 'normal'
+          ? toVfsFilename(fontFamily)
+          : toVfsFilename(`${fontFamily}-${style}`)
+      if (!doc.existsFileInVFS(filename)) {
+        // eslint-disable-next-line no-await-in-loop
+        const base64 = await loadUrlAsBase64(url)
+        doc.addFileToVFS(filename, base64)
+      }
+      resolvedFilenameByStyle[style] = filename
+    }
+
+    registerPdfFontStyles(doc, resolvedFilenameByStyle, fontFamily)
+  } catch (e) {
+    warn(debug, `Failed to register font '${fontFamily}' from URL`, e)
+  }
+}
+
+function resolveSimHeiAliasSource(
+  fonts: Record<string, TPdfFontFileMap>
+): TPdfFontFileMap | null {
+  if (fonts.SimHei) {
+    return fonts.SimHei
+  }
+
+  const simSun = fonts.SimSun
+  if (!simSun || typeof simSun === 'string' || !simSun.bold) {
+    return null
+  }
+
+  return {
+    normal: simSun.bold
+  }
+}
+
+export async function bootstrapPdfFonts(
+  doc: jsPDF,
+  options: IFontBootstrapOption = {}
+) {
+  await registerSongFallback(doc, options.debug)
+
+  const fonts = options.fonts || {}
+  for (const [fontFamily, url] of Object.entries(fonts)) {
+    if (!fontFamily || !url) continue
+    // eslint-disable-next-line no-await-in-loop
+    await registerFontFromUrl(doc, fontFamily, url, options.debug)
+  }
+
+  const simHeiAliasSource = resolveSimHeiAliasSource(fonts)
+  if (simHeiAliasSource) {
+    await registerFontFromUrl(doc, 'SimHei', simHeiAliasSource, options.debug)
+  }
+
+  const defaultFontFamily = options.defaultFontFamily || 'Song'
+  const resolvedDefaultFontFamily = resolvePdfFontFamily(
+    doc,
+    defaultFontFamily
+  )
+  try {
+    doc.setFont(resolvedDefaultFontFamily)
+  } catch (e) {
+    warn(
+      options.debug,
+      `Failed to set default PDF font to '${resolvedDefaultFontFamily}'`,
+      e
+    )
+  }
+
+  return {
+    defaultFontFamily: resolvedDefaultFontFamily
+  }
+}
