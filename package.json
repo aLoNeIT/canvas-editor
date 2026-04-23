@@ -2,7 +2,7 @@
   "name": "@alonetech/canvas-editor",
   "author": "aLoNe.Adams.K",
   "license": "MIT",
-  "version": "0.1",
+  "version": "0.1.0",
   "description": "canvas/svg的富文本编辑器，原始作者为Hufe921",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
