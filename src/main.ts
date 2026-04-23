@@ -25,11 +25,37 @@ import Editor, {
 import { Dialog } from './components/dialog/Dialog'
 import { formatPrismToken } from './utils/prism'
 import { Signature } from './components/signature/Signature'
+import simheiTtfUrl from './assets/fonts/simhei.ttf'
+import simsunTtfUrl from './assets/fonts/simsun.ttf'
+import { jspdfPlugin, type CommandWithJspdf } from './plugins/jspdf'
 import { debounce, nextTick, scrollIntoView } from './utils'
 
-window.onload = function () {
+async function registerBrowserFont(fontFamily: string, url: string) {
+  if (
+    typeof FontFace === 'undefined' ||
+    typeof document === 'undefined' ||
+    !('fonts' in document)
+  ) {
+    return
+  }
+
+  const fontSet = document.fonts as any
+  if (typeof fontSet.check === 'function' && fontSet.check(`16px "${fontFamily}"`)) {
+    return
+  }
+
+  const fontFace = new FontFace(fontFamily, `url(${url})`)
+  await fontFace.load()
+  fontSet.add(fontFace)
+  await fontSet.load(`16px "${fontFamily}"`)
+}
+
+window.onload = async function () {
   const isApple =
     typeof navigator !== 'undefined' && /Mac OS X/.test(navigator.userAgent)
+
+  await registerBrowserFont('SimHei', simheiTtfUrl)
+  await registerBrowserFont('SimSun', simsunTtfUrl)
 
   // 1. 初始化编辑器
   const container = document.querySelector<HTMLDivElement>('.editor')!
@@ -60,13 +86,61 @@ window.onload = function () {
         }
       ]
     },
-    options
+    {
+      ...options,
+      defaultFont: 'SimSun',
+      watermark: {
+        ...options.watermark,
+        data: options.watermark?.data || '',
+        font: 'SimSun'
+      },
+      pageNumber: {
+        ...options.pageNumber,
+        font: 'SimSun'
+      }
+    }
   )
+  instance.use(jspdfPlugin, {
+    fonts: {
+      SimSun: {
+        normal: simsunTtfUrl,
+        bold: simheiTtfUrl
+      }
+    },
+    defaultFontFamily: 'SimSun'
+  })
   console.log('实例: ', instance)
   // cypress使用
   Reflect.set(window, 'editor', instance)
   // canvas-editor-devtools使用
   Reflect.set(window, '__CANVAS_EDITOR_INSTANCE__', instance)
+  const exportPdfBase64 = async () => {
+    return await (
+      instance.command as CommandWithJspdf
+    ).executeExportPdfBase64()
+  }
+  const exportPdf = async () => {
+    // Open the tab before awaiting PDF generation so popup blockers
+    // still treat the preview as a user-initiated action.
+    const previewWindow = window.open('', '_blank')
+    const pdfBase64 = await exportPdfBase64()
+    const pdfBinary = atob(pdfBase64)
+    const bytes = Uint8Array.from(pdfBinary, char => char.charCodeAt(0))
+    const blob = new Blob([bytes], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    if (previewWindow && !previewWindow.closed) {
+      previewWindow.location.href = url
+      return
+    }
+    window.location.href = url
+  }
+  if (import.meta.env.DEV) {
+    Reflect.set(window, '__exportPdfBase64', exportPdfBase64)
+    Reflect.set(window, '__exportPdfDiagnostics', () =>
+      (instance.command as CommandWithJspdf).executeExportPdfDiagnostics()
+    )
+    Reflect.set(window, '__exportPdf', exportPdf)
+  }
 
   // 菜单弹窗销毁
   window.addEventListener(
@@ -1259,6 +1333,14 @@ window.onload = function () {
     instance.command.executePrint()
   }
 
+  const exportPdfDom =
+    document.querySelector<HTMLDivElement>('.menu-item__export-pdf')!
+  exportPdfDom.title = '导出 PDF'
+  exportPdfDom.onclick = function () {
+    console.log('export-pdf')
+    exportPdf()
+  }
+
   // 6. 目录显隐 | 页面模式 | 纸张缩放 | 纸张大小 | 纸张方向 | 页边距 | 全屏 | 设置
   const editorOptionDom =
     document.querySelector<HTMLDivElement>('.editor-option')!
@@ -1531,7 +1613,7 @@ window.onload = function () {
     instance.command.executeMode(mode)
     // 设置菜单栏权限视觉反馈
     const isReadonly = mode === EditorMode.READONLY
-    const enableMenuList = ['search', 'print']
+    const enableMenuList = ['search', 'print', 'export-pdf']
     document.querySelectorAll<HTMLDivElement>('.menu-item>div').forEach(dom => {
       const menu = dom.dataset.menu
       isReadonly && (!menu || !enableMenuList.includes(menu))

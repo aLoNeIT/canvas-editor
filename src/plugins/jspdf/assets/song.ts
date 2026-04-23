@@ -1,3 +1,6 @@
-import songTtfUrl from '../../../assets/fonts/simsun.ttf'
+const songFontModuleMap = import.meta.globEager(
+  '../../../assets/fonts/simsun.ttf'
+) as Record<string, { default: string }>
 
-export const SONG_TTF_URL = songTtfUrl
+export const SONG_TTF_URL =
+  songFontModuleMap['../../../assets/fonts/simsun.ttf']?.default || ''
