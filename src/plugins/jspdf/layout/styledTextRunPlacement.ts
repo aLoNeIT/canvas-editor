@@ -17,6 +17,8 @@ export interface IStyledTextRun {
   strikeout?: boolean
   color?: string
   highlight?: string
+  highlightMarginHeight?: number
+  highlightOpacity?: number
   linkUrl?: string
   areaId?: string
   areaBackgroundColor?: string
@@ -90,6 +92,8 @@ function isSameStyle(
     left.strikeout === right.strikeout &&
     left.color === right.color &&
     left.highlight === right.highlight &&
+    left.highlightMarginHeight === right.highlightMarginHeight &&
+    left.highlightOpacity === right.highlightOpacity &&
     left.linkUrl === right.linkUrl &&
     left.areaId === right.areaId &&
     left.areaBackgroundColor === right.areaBackgroundColor &&
@@ -200,6 +204,8 @@ function flushLine(
       strikeout: fallbackRun.strikeout,
       color: fallbackRun.color,
       highlight: fallbackRun.highlight,
+      highlightMarginHeight: fallbackRun.highlightMarginHeight,
+      highlightOpacity: fallbackRun.highlightOpacity,
       linkUrl: fallbackRun.linkUrl,
       areaId: fallbackRun.areaId,
       areaBackgroundColor: fallbackRun.areaBackgroundColor,
@@ -293,6 +299,8 @@ export function createStyledTextRunPlacements(
           strikeout: run.strikeout,
           color: run.color,
           highlight: run.highlight,
+          highlightMarginHeight: run.highlightMarginHeight,
+          highlightOpacity: run.highlightOpacity,
           linkUrl: run.linkUrl,
           areaId: run.areaId,
           areaBackgroundColor: run.areaBackgroundColor,
@@ -359,6 +367,8 @@ export function createStyledTextRunPlacements(
         strikeout: segment.strikeout,
         color: segment.color,
         highlight: segment.highlight,
+        highlightMarginHeight: segment.highlightMarginHeight,
+        highlightOpacity: segment.highlightOpacity,
         linkUrl: segment.linkUrl,
         areaId: segment.areaId,
         areaBackgroundColor: segment.areaBackgroundColor,

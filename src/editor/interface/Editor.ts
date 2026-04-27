@@ -143,6 +143,11 @@ export type IUpdateOption = Omit<
   | 'scrollContainerSelector'
 >
 
+export interface IEditorLoadJSONPayload {
+  data?: Partial<IEditorData>
+  options?: IEditorOption
+}
+
 export interface ISetValueOption {
   isSetCursor?: boolean
 }

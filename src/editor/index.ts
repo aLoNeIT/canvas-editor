@@ -1,6 +1,11 @@
 import './assets/css/index.css'
 import { version } from '../../package.json'
-import { IEditorData, IEditorOption, IEditorResult } from './interface/Editor'
+import {
+  IEditorData,
+  IEditorLoadJSONPayload,
+  IEditorOption,
+  IEditorResult
+} from './interface/Editor'
 import { IElement } from './interface/Element'
 import { Draw } from './core/draw/Draw'
 import { Command } from './core/command/Command'
@@ -225,6 +230,7 @@ export {
 export type {
   IElement,
   IEditorData,
+  IEditorLoadJSONPayload,
   IEditorOption,
   IEditorResult,
   IContextMenuContext,

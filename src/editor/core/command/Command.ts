@@ -94,6 +94,7 @@ export class Command {
   public executeUpdateElementById: CommandAdapt['updateElementById']
   public executeDeleteElementById: CommandAdapt['deleteElementById']
   public executeSetValue: CommandAdapt['setValue']
+  public executeLoadJSON: CommandAdapt['loadJSON']
   public executeRemoveControl: CommandAdapt['removeControl']
   public executeTranslate: CommandAdapt['translate']
   public executeSetLocale: CommandAdapt['setLocale']
@@ -120,6 +121,7 @@ export class Command {
   public executeComputeElementListHeight: CommandAdapt['computeElementListHeight']
   public getCatalog: CommandAdapt['getCatalog']
   public getImage: CommandAdapt['getImage']
+  public getLayoutSnapshot: CommandAdapt['getLayoutSnapshot']
   public getOptions: CommandAdapt['getOptions']
   public getValue: CommandAdapt['getValue']
   public getValueAsync: CommandAdapt['getValueAsync']
@@ -254,6 +256,7 @@ export class Command {
     this.executeUpdateElementById = adapt.updateElementById.bind(adapt)
     this.executeDeleteElementById = adapt.deleteElementById.bind(adapt)
     this.executeSetValue = adapt.setValue.bind(adapt)
+    this.executeLoadJSON = adapt.loadJSON.bind(adapt)
     this.executeRemoveControl = adapt.removeControl.bind(adapt)
     this.executeTranslate = adapt.translate.bind(adapt)
     this.executeSetLocale = adapt.setLocale.bind(adapt)
@@ -271,6 +274,7 @@ export class Command {
       adapt.computeElementListHeight.bind(adapt)
     // 获取
     this.getImage = adapt.getImage.bind(adapt)
+    this.getLayoutSnapshot = adapt.getLayoutSnapshot.bind(adapt)
     this.getOptions = adapt.getOptions.bind(adapt)
     this.getValue = adapt.getValue.bind(adapt)
     this.getValueAsync = adapt.getValueAsync.bind(adapt)

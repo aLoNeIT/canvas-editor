@@ -2,11 +2,11 @@
 
 `src/plugins/jspdf` 提供基于 `jspdf` 的 PDF 导出能力。
 
-当前实现的重点不是在插件侧重新做一套完整打印布局，而是尽量直接消费编辑器核心的打印结果：
+当前实现的重点不是在插件侧重新做一套完整打印布局，而是直接消费编辑器核心的打印布局结果：
 
-- 先读取核心打印页图片 `editor.command.getImage({ mode: PRINT })`
-- 再读取核心布局快照 `getLayoutSnapshot()`
-- 当核心打印页快照可用时，插件会直接按核心页尺寸生成 PDF 页面
+- 读取核心布局快照 `getLayoutSnapshot()`
+- 使用核心 `pageRowList` / position 列表决定分页、行位置和页眉页脚位置
+- 插件自己用 jsPDF 绘制文本、线条和文档内图片，不再读取核心整页图片导出
 
 这条链路的目标是尽量让 PDF 结果与核心打印结果保持一致，降低内容变化后反复调版的成本。
 
@@ -59,7 +59,7 @@ const pdfBase64 = await (editor.command as CommandWithJspdf)
 说明：
 
 - `mode` 默认就是 `EditorMode.PRINT`，传其他模式会直接抛错。
-- `__printPageDataUrlList` 是插件内部字段，不建议外部传入。
+- 导出依赖核心 `getLayoutSnapshot()`，缺少核心布局快照时会直接报错。
 
 ## 推荐用法
 
@@ -95,27 +95,27 @@ console.log(diagnostics.fallbackBlocks)
 PDF export currently requires print mode layout
 ```
 
-### 页面尺寸来自核心布局结果
+### 页面尺寸和排版来自核心布局结果
 
 PDF 的纸张尺寸来自 `pageModel.width` / `pageModel.height`，最终会按 `72 / 96` 从 CSS 像素换算为 jsPDF 的点值。
 
-在核心打印页快照可用的情况下，插件会直接把整页打印结果作为页面背景放进 PDF，因此：
+插件会消费核心布局快照生成 PDF 页面，因此：
 
 - 页数优先与核心打印结果保持一致
+- 行位置、页眉页脚高度优先与核心布局保持一致
 - 页面大小优先与编辑器中的纸张设置保持一致
-- 内容变化后的分页差异会明显小于“插件自己单独重排一遍”的方案
+- 不会把核心 canvas 整页图片作为 PDF 页面背景
 
 ### 仍然保留插件自己的归一化与渲染管线
 
 当前导出链路仍然会经过这些阶段：
 
-1. `readEditorPrintPageDataUrlList`
-2. `readEditorState`
-3. `normalizeDocument`
-4. `layoutDocument`
-5. `renderPdfBase64`
+1. `readEditorState`
+2. `normalizeDocument`
+3. `layoutDocument`
+4. `renderPdfBase64`
 
-但在核心打印页快照存在时，`layoutDocument()` 会优先走核心快照页面，而不是重新做主内容分页。
+`layoutDocument()` 会基于核心布局快照生成 page model，而不是重新做主内容分页。
 
 ## 字体建议
 

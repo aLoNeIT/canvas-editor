@@ -12,6 +12,7 @@ import Editor, {
   IBlock,
   ICatalogItem,
   IElement,
+  IEditorLoadJSONPayload,
   KeyMap,
   ListStyle,
   ListType,
@@ -526,6 +527,43 @@ window.onload = async function () {
         })
         imageFileDom.value = ''
       }
+    }
+  }
+
+  const loadJsonDom =
+    document.querySelector<HTMLDivElement>('.menu-item__load-json')!
+  const jsonFileDom = document.querySelector<HTMLInputElement>('#json')!
+  loadJsonDom.onclick = function () {
+    jsonFileDom.click()
+  }
+  jsonFileDom.onchange = function () {
+    const file = jsonFileDom.files?.[0]
+    if (!file) return
+    const fileReader = new FileReader()
+    fileReader.readAsText(file)
+    fileReader.onload = function () {
+      try {
+        const payload = JSON.parse(fileReader.result as string) as
+          IEditorLoadJSONPayload
+        if (!payload || typeof payload !== 'object') {
+          throw new Error('JSON文件内容无效')
+        }
+        if (!payload.data && !payload.options) {
+          throw new Error('JSON文件需要包含data或options节点')
+        }
+        instance.command.executeLoadJSON({
+          data: payload.data,
+          options: payload.options
+        })
+      } catch (error) {
+        alert(error instanceof Error ? error.message : '加载JSON文件失败')
+      } finally {
+        jsonFileDom.value = ''
+      }
+    }
+    fileReader.onerror = function () {
+      alert('读取JSON文件失败')
+      jsonFileDom.value = ''
     }
   }
 

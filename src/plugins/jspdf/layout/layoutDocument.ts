@@ -4,13 +4,24 @@ import type { IDocumentBlockNode, IDocumentModel } from '../model/document'
 import type { IPageModel } from '../model/layout'
 import { measureLineHeight, measureText } from '../measure/textMeasure'
 import { BlockType } from '../../../editor/dataset/enum/Block'
+import { ZERO } from '../../../editor/dataset/constant/Common'
+import { defaultCheckboxOption } from '../../../editor/dataset/constant/Checkbox'
+import { defaultRadioOption } from '../../../editor/dataset/constant/Radio'
 import { ImageDisplay } from '../../../editor/dataset/enum/Common'
+import { ControlComponent } from '../../../editor/dataset/enum/Control'
 import { ElementType } from '../../../editor/dataset/enum/Element'
 import { LineNumberType } from '../../../editor/dataset/enum/LineNumber'
+import { ListStyle, ListType } from '../../../editor/dataset/enum/List'
 import { WatermarkType } from '../../../editor/dataset/enum/Watermark'
 import { splitText } from '../../../editor/utils'
+import type {
+  IElement,
+  IElementPosition
+} from '../../../editor/interface/Element'
+import type { IRow, IRowElement } from '../../../editor/interface/Row'
 import {
   createListMarkerPlacement,
+  getRowMarginRatio,
   resolveBlockTextStyle,
   resolveListBlockSemantics,
   type IListBlockSemantics,
@@ -53,7 +64,14 @@ const DIGIT_REG = /[0-9]/
 const SHORT_CJK_LINE_MAX_LENGTH = 24
 const SHORT_CJK_LINE_MAX_SIZE = 18
 const COMPACT_MIXED_LINE_MAX_LENGTH = 48
-const rasterSourceImageCache = new Map<string, Promise<HTMLImageElement>>()
+const coreElementSourceIndexMap = new WeakMap<IRowElement, number>()
+const coreRowOmittedWidthMap = new WeakMap<IRow, Map<number, number>>()
+const CORE_ZERO_WIDTH_CHAR_REG = /[\u200b-\u200d\ufeff]/g
+const unorderedCoreListMarkerMap: Partial<Record<ListStyle, string>> = {
+  [ListStyle.DISC]: '\u2022',
+  [ListStyle.CIRCLE]: '\u25e6',
+  [ListStyle.SQUARE]: '\u25aa'
+}
 
 interface ITableRowPlacement {
   kind: 'table-row'
@@ -159,56 +177,6 @@ function createPage(pageNo: number, documentModel: IDocumentModel): IPageModel {
     rasterBlocks: [],
     issues: []
   }
-}
-
-function loadRasterSourceImage(dataUrl: string) {
-  const cached = rasterSourceImageCache.get(dataUrl)
-  if (cached) {
-    return cached
-  }
-
-  const imagePromise = new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image()
-    image.onload = () => resolve(image)
-    image.onerror = () =>
-      reject(new Error('Failed to load raster source image'))
-    image.src = dataUrl
-  })
-  rasterSourceImageCache.set(dataUrl, imagePromise)
-  return imagePromise
-}
-
-async function cropPageRegionDataUrl(
-  dataUrl: string,
-  crop: {
-    x: number
-    y: number
-    width: number
-    height: number
-  }
-) {
-  const image = await loadRasterSourceImage(dataUrl)
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.max(1, Math.ceil(crop.width))
-  canvas.height = Math.max(1, Math.ceil(crop.height))
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    throw new Error('Fallback crop canvas context is unavailable')
-  }
-
-  ctx.drawImage(
-    image,
-    crop.x,
-    crop.y,
-    crop.width,
-    crop.height,
-    0,
-    0,
-    canvas.width,
-    canvas.height
-  )
-
-  return canvas.toDataURL('image/png')
 }
 
 function resolvePlacementRasterBounds(
@@ -1286,12 +1254,18 @@ function shouldRasterizeContentTextLine(
   }
 
   const charList = [...text]
+  const hasBaselineShift = placementList.some(
+    placement => Math.abs(placement.baselineShift || 0) > 0.001
+  )
+  if (hasBaselineShift) {
+    return true
+  }
+
   const cjkCount = charList.filter(char => CJK_CHAR_REG.test(char)).length
   if (!cjkCount) {
     return false
   }
 
-  const cjkRatio = cjkCount / charList.length
   const maxSize = Math.max(...placementList.map(placement => placement.size))
   const alphaCount = charList.filter(char => ASCII_ALPHA_REG.test(char)).length
   const digitCount = charList.filter(char => DIGIT_REG.test(char)).length
@@ -1300,9 +1274,7 @@ function shouldRasterizeContentTextLine(
     alphaCount > 0 ||
     digitCount > 0 ||
     otherCount > 0
-  const hasBaselineShift = placementList.some(
-    placement => Math.abs(placement.baselineShift || 0) > 0.001
-  )
+  const cjkRatio = cjkCount / charList.length
   const isShortSmallCjkLine =
     charList.length <= SHORT_CJK_LINE_MAX_LENGTH &&
     maxSize <= SHORT_CJK_LINE_MAX_SIZE &&
@@ -1320,10 +1292,6 @@ function shouldRasterizeContentTextLine(
     (cjkCount > 0 || digitCount > 0)
 
   if (shouldRasterizeDenseCjkTextLine(block, placementList, stage)) {
-    return true
-  }
-
-  if (hasBaselineShift) {
     return true
   }
 
@@ -1378,13 +1346,15 @@ async function appendPlacementTextRasterFallback(
   x: number,
   y: number,
   stage: number,
-  documentModel: IDocumentModel
+  documentModel: IDocumentModel,
+  force = false
 ) {
-  if (documentModel.disableTextRasterFallback) {
+  if (documentModel.disableTextRasterFallback && !force) {
     return false
   }
 
   if (
+    !force &&
     !shouldRasterizeDenseCjkTextLine(block, placementList, stage) &&
     !shouldRasterizeContentTextLine(block, placementList, stage)
   ) {
@@ -1392,30 +1362,6 @@ async function appendPlacementTextRasterFallback(
   }
 
   const bounds = resolvePlacementRasterBounds(placementList, x, y)
-
-  const printPageDataUrl = documentModel.printPageDataUrlList?.[page.pageNo]
-  if (printPageDataUrl) {
-    const dataUrl = await cropPageRegionDataUrl(printPageDataUrl, {
-      x: bounds.x,
-      y: bounds.y,
-      width: bounds.width,
-      height: bounds.height
-    })
-
-    resolveFallback(page, {
-      pageNo: page.pageNo,
-      stage,
-      x: bounds.x,
-      y: bounds.y,
-      width: bounds.width,
-      height: bounds.height,
-      dataUrl,
-      sourceType: DENSE_CJK_FALLBACK_SOURCE_TYPE,
-      layer: 'content'
-    })
-
-    return true
-  }
 
   const fallback = await rasterizeElement(
     ctx => {
@@ -1504,30 +1450,6 @@ async function appendStaticZoneTextRasterFallback(
   }
 
   const bounds = resolvePlacementRasterBounds(placementList, x, y)
-
-  const printPageDataUrl = documentModel.printPageDataUrlList?.[page.pageNo]
-  if (printPageDataUrl) {
-    const dataUrl = await cropPageRegionDataUrl(printPageDataUrl, {
-      x: bounds.x,
-      y: bounds.y,
-      width: bounds.width,
-      height: bounds.height
-    })
-
-    resolveFallback(page, {
-      pageNo: page.pageNo,
-      stage,
-      x: bounds.x,
-      y: bounds.y,
-      width: bounds.width,
-      height: bounds.height,
-      dataUrl,
-      sourceType: DENSE_CJK_FALLBACK_SOURCE_TYPE,
-      layer: 'content'
-    })
-
-    return true
-  }
 
   const fallback = await rasterizeElement(
     ctx => {
@@ -2113,13 +2035,16 @@ function getResolvedTableRowHeightList(
       measureText(
         value,
         style?.font || documentModel.defaults.defaultFont,
-        style?.size || 12,
+        style?.size || documentModel.defaults.defaultSize,
         style?.bold,
         style?.italic
       ).width,
-    lineHeight: getTextLineHeight(documentModel.defaults.defaultFont, 12),
+    lineHeight: getTextLineHeight(
+      documentModel.defaults.defaultFont,
+      documentModel.defaults.defaultSize
+    ),
     font: documentModel.defaults.defaultFont,
-    size: 12,
+    size: documentModel.defaults.defaultSize,
     defaultRowMargin: documentModel.defaults.defaultRowMargin,
     defaultBasicRowMarginHeight:
       documentModel.defaults.defaultBasicRowMarginHeight,
@@ -2413,9 +2338,15 @@ function appendPlacementTextRuns(
     const highlightColor = line.highlight || block.element.highlight
     if (highlightColor) {
       const rowMargin = line.rowMargin || 0
+      const highlightMarginHeight = line.highlightMarginHeight
       const highlightTop =
-        y + line.y - line.baselineOffset - rowMargin
-      const highlightHeight = line.height + rowMargin * 2
+        typeof highlightMarginHeight === 'number'
+          ? y + line.y - line.baselineOffset + rowMargin - highlightMarginHeight
+          : y + line.y - line.baselineOffset - rowMargin
+      const highlightHeight =
+        typeof highlightMarginHeight === 'number'
+          ? line.height - 2 * rowMargin + 2 * highlightMarginHeight
+          : line.height + rowMargin * 2
       page.highlightRects.push({
         pageNo: page.pageNo,
         stage,
@@ -2424,7 +2355,7 @@ function appendPlacementTextRuns(
         width: line.widthOverride ?? Math.min(measured.width, line.width),
         height: highlightHeight,
         color: highlightColor,
-        opacity: 0.6
+        opacity: line.highlightOpacity ?? 0.6
       })
     }
   })
@@ -2460,7 +2391,7 @@ function appendPlacementTextRuns(
   }
 }
 
-function appendTableRow(
+async function appendTableRow(
   page: IPageModel,
   block: IDocumentBlockNode,
   rowIndex: number,
@@ -2484,7 +2415,7 @@ function appendTableRow(
   )
   const rowCount = rowList.length
 
-  row.tdList.forEach(td => {
+  for (const td of row.tdList) {
     const colspan = Math.max(1, td.colspan || 1)
     const rowspan = Math.max(1, td.rowspan || 1)
     const colIndex = td.colIndex || 0
@@ -2535,6 +2466,19 @@ function appendTableRow(
       })
     })
 
+    if (td.rowList?.length && td.positionList?.length) {
+      // eslint-disable-next-line no-await-in-loop
+      await appendCoreRowList(
+        page,
+        filterCoreRowList(td.rowList),
+        td.positionList,
+        documentModel,
+        new Map(),
+        stage
+      )
+      continue
+    }
+
     const cellLineList = createTableCellTextPlacements({
       td,
       x: cellX,
@@ -2542,18 +2486,21 @@ function appendTableRow(
       cellWidth,
       rowHeight: cellHeight,
       font: documentModel.defaults.defaultFont,
-      size: 12,
+      size: documentModel.defaults.defaultSize,
       defaultRowMargin: documentModel.defaults.defaultRowMargin,
       defaultBasicRowMarginHeight:
         documentModel.defaults.defaultBasicRowMarginHeight,
-      lineHeight: getTextLineHeight(documentModel.defaults.defaultFont, 12),
+      lineHeight: getTextLineHeight(
+        documentModel.defaults.defaultFont,
+        documentModel.defaults.defaultSize
+      ),
       tabWidth: documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH,
       color: '#000000',
       measureWidth: (value, style) =>
         measureText(
           value,
           style?.font || documentModel.defaults.defaultFont,
-          style?.size || 12,
+          style?.size || documentModel.defaults.defaultSize,
           style?.bold,
           style?.italic
         ).width
@@ -2619,7 +2566,7 @@ function appendTableRow(
         })
       }
     })
-  })
+  }
 }
 
 function getTableRowBaseline(
@@ -2665,18 +2612,21 @@ function getTableRowBaseline(
       cellWidth,
       rowHeight: cellHeight,
       font: documentModel.defaults.defaultFont,
-      size: 12,
+      size: documentModel.defaults.defaultSize,
       defaultRowMargin: documentModel.defaults.defaultRowMargin,
       defaultBasicRowMarginHeight:
         documentModel.defaults.defaultBasicRowMarginHeight,
-      lineHeight: getTextLineHeight(documentModel.defaults.defaultFont, 12),
+      lineHeight: getTextLineHeight(
+        documentModel.defaults.defaultFont,
+        documentModel.defaults.defaultSize
+      ),
       tabWidth: documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH,
       color: '#000000',
       measureWidth: (value, style) =>
         measureText(
           value,
           style?.font || documentModel.defaults.defaultFont,
-          style?.size || 12,
+          style?.size || documentModel.defaults.defaultSize,
           style?.bold,
           style?.italic
         ).width
@@ -2815,7 +2765,7 @@ async function appendPlacement(
   imageNumberMap: Map<IDocumentBlockNode, number>
 ): Promise<IAppendPlacementResult> {
   if (placement.kind === 'table-row') {
-    appendTableRow(
+    await appendTableRow(
       page,
       placement.block,
       placement.rowIndex,
@@ -2867,7 +2817,7 @@ async function appendPlacement(
   }
 
   if (placement.block.kind === 'table') {
-    appendTableRow(page, placement.block, 0, x, y, width, documentModel)
+    await appendTableRow(page, placement.block, 0, x, y, width, documentModel)
     return {
       renderX: x,
       renderY: y,
@@ -3121,8 +3071,9 @@ async function appendStaticZone(
         width,
         documentModel
       )
-      rowList.forEach(row => {
-        appendTableRow(
+      for (const row of rowList) {
+        // eslint-disable-next-line no-await-in-loop
+        await appendTableRow(
           page,
           block,
           row.rowIndex,
@@ -3133,7 +3084,7 @@ async function appendStaticZone(
           stage
         )
         cursorY += rowHeightList[row.rowIndex] || 24
-      })
+      }
       continue
     }
 
@@ -3325,222 +3276,843 @@ function hasCoreLayoutContent(documentModel: IDocumentModel, pageNo: number) {
   )
 }
 
-function hasCorePrintPageSnapshot(documentModel: IDocumentModel) {
-  return Boolean(
-    documentModel.printPageDataUrlList?.length &&
-    resolveCorePageCount(documentModel)
+function hasRequiredCoreLayout(documentModel: IDocumentModel) {
+  return Boolean(documentModel.coreLayout && resolveCorePageCount(documentModel))
+}
+
+function isCoreCheckControl(element: IElement) {
+  return (
+    element.type === ElementType.CHECKBOX ||
+    element.controlComponent === ControlComponent.CHECKBOX
   )
 }
 
-function createCoreSnapshotPage(
-  pageNo: number,
+function isCoreRadioControl(element: IElement) {
+  return (
+    element.type === ElementType.RADIO ||
+    element.controlComponent === ControlComponent.RADIO
+  )
+}
+
+function hasExportableCoreControlVisual(element: IElement) {
+  return (
+    isCoreCheckControl(element) ||
+    isCoreRadioControl(element) ||
+    isCoreFixedUnderlineControlCarrier(element)
+  )
+}
+
+function isCoreFixedUnderlineControlCarrier(element: IElement) {
+  return Boolean(
+    element.controlComponent === ControlComponent.POSTFIX &&
+    element.control?.minWidth &&
+    element.control?.underline
+  )
+}
+
+function hasCoreRenderableElementContent(element: IElement) {
+  return Boolean(
+    getCoreElementText(element)
+      .replace(CORE_ZERO_WIDTH_CHAR_REG, '')
+      .trim()
+  )
+}
+
+function isExportableCoreElement(element: IElement) {
+  if (!element.controlId) return true
+
+  if (
+    !hasCoreRenderableElementContent(element) &&
+    !hasExportableCoreControlVisual(element)
+  ) {
+    return false
+  }
+
+  return (
+    element.controlComponent === ControlComponent.VALUE ||
+    element.controlComponent === ControlComponent.CHECKBOX ||
+    element.controlComponent === ControlComponent.RADIO ||
+    isCoreFixedUnderlineControlCarrier(element)
+  )
+}
+
+function getCoreElementOccupiedWidth(element: IElement) {
+  const rowElement = element as IRowElement
+  return (
+    (rowElement.metrics?.width || 0) +
+    Math.max(0, rowElement.left || 0)
+  )
+}
+
+function filterCoreElementList<T extends IElement>(elementList: T[]): T[] {
+  return elementList.filter(element => {
+    if (element.type === ElementType.TABLE) {
+      element.trList?.forEach(tr => {
+        tr.tdList.forEach(td => {
+          td.value = filterCoreElementList(td.value)
+        })
+      })
+    }
+    return isExportableCoreElement(element)
+  })
+}
+
+function filterCoreRowList(rowList: IRow[]) {
+  return rowList.map(row => {
+    let omittedWidth = 0
+    const omittedWidthMap = new Map<number, number>()
+    const elementList: IRowElement[] = []
+
+    row.elementList.forEach((element, sourceIndex) => {
+      omittedWidthMap.set(sourceIndex, omittedWidth)
+      if (element.type === ElementType.TABLE) {
+        element.trList?.forEach(tr => {
+          tr.tdList.forEach(td => {
+            td.value = filterCoreElementList(td.value)
+          })
+        })
+      }
+
+      if (!isExportableCoreElement(element)) {
+        omittedWidth += getCoreElementOccupiedWidth(element)
+        return
+      }
+      coreElementSourceIndexMap.set(element, sourceIndex)
+      elementList.push(element)
+    })
+
+    const filteredRow = {
+      ...row,
+      elementList
+    }
+    coreRowOmittedWidthMap.set(filteredRow, omittedWidthMap)
+    return filteredRow
+  })
+}
+
+function createCoreElementBlock(element: IRowElement): IDocumentBlockNode {
+  switch (element.type) {
+    case ElementType.TABLE:
+      return {
+        kind: 'table',
+        element
+      }
+    case ElementType.IMAGE:
+      return {
+        kind: 'image',
+        element
+      }
+    case ElementType.LATEX:
+      return {
+        kind: 'latex',
+        element
+      }
+    case ElementType.BLOCK:
+      return {
+        kind: 'block',
+        element
+      }
+    case ElementType.CONTROL:
+    case ElementType.CHECKBOX:
+    case ElementType.RADIO:
+      return {
+        kind: 'control',
+        element
+      }
+    default:
+      return {
+        kind: 'paragraph',
+        element
+      }
+  }
+}
+
+function getCoreElementText(element: IElement) {
+  if (
+    element.hide ||
+    element.control?.hide ||
+    element.area?.hide ||
+    element.type === ElementType.TAB
+  ) {
+    return ''
+  }
+
+  return element.value === ZERO ? '' : element.value || ''
+}
+
+function resolveCoreElementRowMargin(
+  element: IRowElement,
   documentModel: IDocumentModel
 ) {
-  const page = createPage(pageNo, documentModel)
-  const dataUrl = documentModel.printPageDataUrlList?.[pageNo]
-  if (dataUrl) {
-    page.rasterBlocks.push({
-      pageNo,
-      stage: PDF_RENDER_STAGE.BACKGROUND,
-      x: 0,
-      y: 0,
-      width: documentModel.width,
-      height: documentModel.height,
-      dataUrl,
-      layer: 'background',
-      sourceType: 'image',
-      debugLabel: 'core-print-page'
-    })
-  }
-  if (documentModel.coreLayout?.iframeInfoList?.[pageNo]?.length) {
-    page.issues.push('pending:block-iframe')
-  }
-  appendGraffiti(page, documentModel)
-  return page
+  const size = element.size || documentModel.defaults.defaultSize
+  return (
+    documentModel.defaults.defaultBasicRowMarginHeight *
+    getRowMarginRatio(size) *
+    (element.rowMargin ?? documentModel.defaults.defaultRowMargin)
+  )
 }
 
-export async function layoutDocument(
+function createCoreTextPlacement(
+  element: IRowElement,
+  row: IRow,
+  position: IElementPosition,
   documentModel: IDocumentModel
-): Promise<IPageModel[]> {
-  const resolved = resolveDocumentZoneHeights(documentModel)
-  const contentWidth = resolved.contentWidth
-  const resolvedDocumentModel = resolved.documentModel
-  if (hasCorePrintPageSnapshot(resolvedDocumentModel)) {
-    const corePageCount = resolveCorePageCount(resolvedDocumentModel)
-    return Array.from({ length: corePageCount }, (_, pageNo) =>
-      createCoreSnapshotPage(pageNo, resolvedDocumentModel)
-    )
+): IStyledTextPlacementLine['placementList'][number] | null {
+  const text = getCoreElementText(element)
+  if (!text || !hasCoreRenderableElementContent(element)) return null
+
+  const font = element.font || documentModel.defaults.defaultFont
+  const size =
+    element.type === ElementType.SUPERSCRIPT ||
+    element.type === ElementType.SUBSCRIPT
+      ? element.actualSize || element.size || documentModel.defaults.defaultSize
+      : element.size || documentModel.defaults.defaultSize
+  const metrics = element.metrics
+  const baselineOffset = position.ascent
+  const rowMargin = resolveCoreElementRowMargin(element, documentModel)
+  const verticalOffset =
+    element.type === ElementType.SUPERSCRIPT
+      ? -metrics.height / 2
+      : element.type === ElementType.SUBSCRIPT
+        ? metrics.height / 2
+        : 0
+
+  return {
+    text,
+    x: position.coordinate.leftTop[0],
+    y: position.coordinate.leftTop[1] + baselineOffset + verticalOffset,
+    width: metrics.width,
+    widthOverride: metrics.width,
+    height: row.height,
+    baselineOffset,
+    ascent: metrics.boundingBoxAscent,
+    descent: metrics.boundingBoxDescent,
+    baselineShift: verticalOffset,
+    rowMargin,
+    font,
+    size,
+    letterSpacing: element.letterSpacing,
+    bold: element.bold,
+    italic: element.italic,
+    color: element.color || documentModel.defaults.defaultColor,
+    highlight: element.highlight,
+    highlightMarginHeight: documentModel.defaults.highlightMarginHeight,
+    highlightOpacity: documentModel.defaults.highlightAlpha,
+    underline: element.underline || element.control?.underline,
+    strikeout: element.strikeout,
+    linkUrl:
+      element.type === ElementType.HYPERLINK
+        ? element.url
+        : undefined
   }
-  const headerDisabled = resolvedDocumentModel.defaults.header?.disabled ?? false
-  const footerDisabled = resolvedDocumentModel.defaults.footer?.disabled ?? false
-  const lineNumberDisabled =
-    resolvedDocumentModel.defaults.lineNumber?.disabled ?? true
-  const frame = layoutFrame(resolvedDocumentModel)
-  const mainPageHeight = Math.max(1, frame.mainBottom - frame.mainTop)
-  const placements = collectMainPlacements(
-    resolvedDocumentModel.main.blockList,
-    contentWidth,
-    mainPageHeight,
-    resolvedDocumentModel
-  )
-  const placementIndexes = paginateMainPlacements(
-    placements,
-    frame,
-    resolvedDocumentModel,
-    contentWidth
-  )
+}
 
-  const computedPageCount = getRequiredPageCount(
-    resolvedDocumentModel,
-    placementIndexes.length
+function createCoreEmptyUnderlinePlacement(
+  element: IRowElement,
+  row: IRow,
+  position: IElementPosition,
+  documentModel: IDocumentModel
+): IStyledTextPlacementLine['placementList'][number] | null {
+  const offsetX = Math.max(0, element.left || 0)
+  const width = Math.max(
+    element.metrics.width + offsetX,
+    element.control?.minWidth || 0
   )
-  const corePageCount = resolveCorePageCount(resolvedDocumentModel)
-  const pageCount = Math.max(corePageCount, computedPageCount || 0, 1)
-  const pageList: IPageModel[] = []
-  const imageNumberMap = new Map<IDocumentBlockNode, number>()
-  let imageNo = 1
-  resolvedDocumentModel.main.blockList.forEach(block => {
-    if (block.kind !== 'image') {
-      return
-    }
+  if (!element.control?.underline || !width) return null
 
-    imageNumberMap.set(block, imageNo)
-    imageNo += 1
+  const size = element.size || documentModel.defaults.defaultSize
+  const baselineOffset = position.ascent
+  const rowMargin = resolveCoreElementRowMargin(element, documentModel)
+  return {
+    text: ' ',
+    x: position.coordinate.leftTop[0] - offsetX,
+    y: position.coordinate.leftTop[1] + baselineOffset,
+    width,
+    widthOverride: width,
+    height: row.height,
+    baselineOffset,
+    ascent: element.metrics.boundingBoxAscent,
+    descent: element.metrics.boundingBoxDescent,
+    rowMargin,
+    font: element.font || documentModel.defaults.defaultFont,
+    size,
+    color: element.color || documentModel.defaults.defaultColor,
+    underline: true
+  }
+}
+
+function createCoreControlSvgDataUrl(markup: string) {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`
+}
+
+function appendCoreCheckControl(
+  page: IPageModel,
+  element: IRowElement,
+  x: number,
+  baselineY: number,
+  stage: number
+) {
+  const isCheckbox = isCoreCheckControl(element)
+  const isRadio = isCoreRadioControl(element)
+  if (!isCheckbox && !isRadio) {
+    return false
+  }
+
+  const option = isCheckbox ? defaultCheckboxOption : defaultRadioOption
+  const width = element.metrics.width || option.width + option.gap * 2
+  const height = element.metrics.height || option.height
+  const lineWidth = option.lineWidth
+  const boxWidth = Math.max(1, width - option.gap * 2)
+  const boxHeight = height
+  const left = option.gap
+  const top = lineWidth
+  const checked = isCheckbox
+    ? Boolean(element.checkbox?.value)
+    : Boolean(element.radio?.value)
+
+  const svg = isCheckbox
+    ? `
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height + lineWidth * 2}" viewBox="0 0 ${width} ${height + lineWidth * 2}">
+  <rect x="${left}" y="${top}" width="${boxWidth}" height="${boxHeight}" fill="${checked ? defaultCheckboxOption.checkFillStyle : defaultCheckboxOption.fillStyle}" stroke="${checked ? defaultCheckboxOption.checkStrokeStyle : defaultCheckboxOption.strokeStyle}" stroke-width="${lineWidth}"/>
+  ${checked ? `<path d="M ${left + 2} ${top + boxHeight / 2} L ${left + boxWidth / 2} ${top + boxHeight - 3} L ${left + boxWidth - 2} ${top + 3}" fill="none" stroke="${defaultCheckboxOption.checkMarkColor}" stroke-width="${lineWidth * 2}" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
+</svg>`.trim()
+    : `
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height + lineWidth * 2}" viewBox="0 0 ${width} ${height + lineWidth * 2}">
+  <circle cx="${left + boxWidth / 2}" cy="${top + boxHeight / 2}" r="${boxWidth / 2}" fill="none" stroke="${checked ? defaultRadioOption.fillStyle : defaultRadioOption.strokeStyle}" stroke-width="${lineWidth}"/>
+  ${checked ? `<circle cx="${left + boxWidth / 2}" cy="${top + boxHeight / 2}" r="${boxWidth / 3}" fill="${defaultRadioOption.fillStyle}"/>` : ''}
+</svg>`.trim()
+
+  page.rasterBlocks.push({
+    pageNo: page.pageNo,
+    stage,
+    x,
+    y: baselineY - height,
+    width,
+    height: height + lineWidth * 2,
+    dataUrl: createCoreControlSvgDataUrl(svg),
+    sourceType: isCheckbox ? 'checkbox-control' : 'radio-control',
+    debugLabel: isCheckbox ? 'core-checkbox' : 'core-radio',
+    layer: 'content'
   })
+
+  return true
+}
+
+function getCoreListMarkerText(element: IRowElement, row: IRow) {
+  const listStyle = element.listStyle ||
+    (element.listType === ListType.OL ? ListStyle.DECIMAL : ListStyle.DISC)
+  if (element.listType === ListType.OL) {
+    return `${(row.listIndex ?? 0) + 1}.`
+  }
+  if (listStyle === ListStyle.CHECKBOX) {
+    return ''
+  }
+  return unorderedCoreListMarkerMap[listStyle] || unorderedCoreListMarkerMap[
+    ListStyle.DISC
+  ]!
+}
+
+function getCoreListMarkerStyle(
+  row: IRow,
+  documentModel: IDocumentModel
+) {
+  const styledElement = documentModel.defaults.listInheritStyle
+    ? row.elementList.find(element =>
+        element.font || element.size || element.bold || element.italic
+      ) || row.elementList[0]
+    : null
+
+  return {
+    font: styledElement?.font || documentModel.defaults.defaultFont,
+    size: styledElement?.size || documentModel.defaults.defaultSize,
+    bold: styledElement?.bold,
+    italic: styledElement?.italic,
+    color: styledElement?.color || documentModel.defaults.defaultColor
+  }
+}
+
+function appendCoreListMarker(
+  page: IPageModel,
+  row: IRow,
+  position: IElementPosition,
+  documentModel: IDocumentModel,
+  stage: number
+) {
+  const startElement = row.elementList[0]
+  if (
+    !row.isList ||
+    !startElement ||
+    startElement.value !== ZERO ||
+    startElement.listWrap ||
+    !startElement.listId ||
+    !startElement.listType
+  ) {
+    return
+  }
+
+  const tabWidth = row.elementList.reduce((width, element, index) => {
+    if (index === 0) return width
+    if (element.type !== ElementType.TAB) return width
+    return width + (documentModel.defaults.defaultTabWidth ?? DEFAULT_TAB_WIDTH)
+  }, 0)
+  const x = position.coordinate.leftTop[0] - (row.offsetX || 0) + tabWidth
+  const y = position.coordinate.leftTop[1] + row.ascent
+
+  if (startElement.listStyle === ListStyle.CHECKBOX) {
+    appendCoreCheckControl(
+      page,
+      {
+        ...startElement,
+        metrics: {
+          ...startElement.metrics,
+          width: defaultCheckboxOption.width + defaultCheckboxOption.gap * 2,
+          height: defaultCheckboxOption.height
+        },
+        checkbox: {
+          value: Boolean(startElement.checkbox?.value)
+        }
+      },
+      x - defaultCheckboxOption.gap,
+      y,
+      stage
+    )
+    return
+  }
+
+  const text = getCoreListMarkerText(startElement, row)
+  if (!text) return
+
+  const style = getCoreListMarkerStyle(row, documentModel)
+  page.textRuns.push({
+    pageNo: page.pageNo,
+    stage,
+    text,
+    x,
+    y,
+    width: measureText(text, style.font, style.size).width,
+    height: row.height,
+    ...style
+  })
+}
+
+function getCorePosition(
+  row: IRow,
+  element: IRowElement,
+  elementIndex: number,
+  positionList: IElementPosition[]
+) {
+  const sourceIndex = coreElementSourceIndexMap.get(element) ?? elementIndex
+  const position = positionList[row.startIndex + sourceIndex]
+  const omittedWidth = coreRowOmittedWidthMap.get(row)?.get(sourceIndex) || 0
+  if (!position || !omittedWidth) return position
+
+  return {
+    ...position,
+    left: position.left - omittedWidth,
+    coordinate: {
+      leftTop: [
+        position.coordinate.leftTop[0] - omittedWidth,
+        position.coordinate.leftTop[1]
+      ],
+      leftBottom: [
+        position.coordinate.leftBottom[0] - omittedWidth,
+        position.coordinate.leftBottom[1]
+      ],
+      rightTop: [
+        position.coordinate.rightTop[0] - omittedWidth,
+        position.coordinate.rightTop[1]
+      ],
+      rightBottom: [
+        position.coordinate.rightBottom[0] - omittedWidth,
+        position.coordinate.rightBottom[1]
+      ]
+    }
+  }
+}
+
+function canRasterizeCoreRowTextElement(element: IRowElement) {
+  if (element.controlId || element.control?.border) {
+    return false
+  }
+  return ![
+    ElementType.IMAGE,
+    ElementType.TABLE,
+    ElementType.HYPERLINK,
+    ElementType.SEPARATOR,
+    ElementType.PAGE_BREAK,
+    ElementType.CONTROL,
+    ElementType.AREA,
+    ElementType.CHECKBOX,
+    ElementType.RADIO,
+    ElementType.LATEX,
+    ElementType.TAB,
+    ElementType.BLOCK,
+    ElementType.LABEL
+  ].includes(element.type!)
+}
+
+async function appendCoreRowTextRasterFallback(
+  page: IPageModel,
+  row: IRow,
+  positionList: IElementPosition[],
+  documentModel: IDocumentModel,
+  stage: number
+) {
+  const placementList: IStyledTextPlacementLine['placementList'] = []
+  const elementSet = new Set<IRowElement>()
+  for (let index = 0; index < row.elementList.length; index++) {
+    const element = row.elementList[index]
+    if (!canRasterizeCoreRowTextElement(element)) continue
+    const position = getCorePosition(row, element, index, positionList)
+    if (!position) continue
+    const placement = createCoreTextPlacement(
+      element,
+      row,
+      position,
+      documentModel
+    )
+    if (!placement) continue
+    placementList.push(placement)
+    elementSet.add(element)
+  }
+
+  if (
+    !placementList.some(
+      placement => Math.abs(placement.baselineShift || 0) > 0.001
+    )
+  ) {
+    return new Set<IRowElement>()
+  }
+
+  const block: IDocumentBlockNode = {
+    kind: 'paragraph',
+    element: row.elementList[0]
+  }
+  if (!shouldRasterizeContentTextLine(block, placementList, stage)) {
+    return new Set<IRowElement>()
+  }
+
+  const fallbackApplied = await appendPlacementTextRasterFallback(
+    page,
+    block,
+    placementList,
+    0,
+    0,
+    stage,
+    documentModel,
+    true
+  )
+
+  return fallbackApplied ? elementSet : new Set<IRowElement>()
+}
+
+async function appendCoreRowElement(
+  page: IPageModel,
+  row: IRow,
+  element: IRowElement,
+  position: IElementPosition,
+  documentModel: IDocumentModel,
+  imageNumberMap: Map<IElementPosition['metrics'], number>,
+  stage: number
+) {
+  if (element.hide || element.control?.hide || element.area?.hide) {
+    return
+  }
+
+  const block = createCoreElementBlock(element)
+  const x = position.coordinate.leftTop[0]
+  const y = position.coordinate.leftTop[1]
+  const renderY = y + position.ascent
+  const width = element.metrics.width
+  const height = element.metrics.height || row.height
+
+  if (isCoreCheckControl(element) || isCoreRadioControl(element)) {
+    appendCoreCheckControl(page, element, x, renderY, stage)
+    return
+  }
+
+  if (element.type === ElementType.TABLE) {
+    let tableY = y
+    for (const tableRow of layoutTable(block)) {
+      // eslint-disable-next-line no-await-in-loop
+      await appendTableRow(
+        page,
+        block,
+        tableRow.rowIndex,
+        x,
+        tableY,
+        width,
+        documentModel,
+        stage
+      )
+      tableY += tableRow.height
+    }
+    return
+  }
+
+  if (
+    element.type === ElementType.IMAGE ||
+    element.type === ElementType.LATEX ||
+    element.type === ElementType.BLOCK
+  ) {
+    await appendImageOrFallback(
+      page,
+      block,
+      x,
+      renderY,
+      width,
+      height,
+      stage
+    )
+    if (element.type === ElementType.IMAGE) {
+      const captionPlacement = createImageCaptionPlacement(
+        block,
+        x,
+        renderY,
+        width,
+        height,
+        documentModel,
+        imageNumberMap.get(element.metrics)
+      )
+      if (captionPlacement) {
+        page.textRuns.push({
+          pageNo: page.pageNo,
+          stage,
+          ...captionPlacement
+        })
+      }
+    }
+    return
+  }
+
+  if (element.type === ElementType.LABEL) {
+    const label = createLabelPlacement({
+      element,
+      x,
+      y,
+      fallbackFont: documentModel.defaults.defaultFont,
+      fallbackSize: documentModel.defaults.defaultSize,
+      fallbackColor: documentModel.defaults.labelDefaultColor,
+      fallbackBackgroundColor:
+        documentModel.defaults.labelDefaultBackgroundColor,
+      fallbackPadding: documentModel.defaults.labelDefaultPadding,
+      measureWidth: createMeasureWidth(
+        element.font || documentModel.defaults.defaultFont,
+        element.size || documentModel.defaults.defaultSize
+      )
+    })
+    page.highlightRects.push({
+      pageNo: page.pageNo,
+      stage,
+      ...label.backgroundRect
+    })
+    appendPlacementTextRuns(page, block, [label.textPlacement], 0, 0, stage)
+    return
+  }
+
+  if (element.type === ElementType.SEPARATOR) {
+    const lineWidth = element.lineWidth || 1
+    page.vectorLines.push({
+      pageNo: page.pageNo,
+      stage,
+      ...createSeparatorVectorLine({
+        element: {
+          ...element,
+          width: element.width || width
+        },
+        x,
+        y: y + row.height / 2,
+        baseY: y + (row.height - lineWidth) / 2
+      })
+    })
+    return
+  }
+
+  const textPlacement = createCoreTextPlacement(
+    element,
+    row,
+    position,
+    documentModel
+  )
+  if (textPlacement) {
+    appendPlacementTextRuns(page, block, [textPlacement], 0, 0, stage)
+    return
+  }
+
+  const underlinePlacement = createCoreEmptyUnderlinePlacement(
+    element,
+    row,
+    position,
+    documentModel
+  )
+  if (underlinePlacement) {
+    createTextDecorationLines([underlinePlacement]).forEach(line => {
+      page.vectorLines.push({
+        pageNo: page.pageNo,
+        stage,
+        ...line
+      })
+    })
+  }
+}
+
+async function appendCoreRowList(
+  page: IPageModel,
+  rowList: IRow[],
+  positionList: IElementPosition[],
+  documentModel: IDocumentModel,
+  imageNumberMap: Map<IElementPosition['metrics'], number>,
+  stage: number,
+  lineNumberBaselineList?: number[]
+) {
+  for (const row of rowList) {
+    if (!row.elementList.length) continue
+
+    let hasLineNumberBaseline = false
+    const startPosition = getCorePosition(
+      row,
+      row.elementList[0],
+      0,
+      positionList
+    )
+    if (startPosition) {
+      appendCoreListMarker(page, row, startPosition, documentModel, stage)
+    }
+    // eslint-disable-next-line no-await-in-loop
+    const rasterTextElementSet = await appendCoreRowTextRasterFallback(
+      page,
+      row,
+      positionList,
+      documentModel,
+      stage
+    )
+    for (let index = 0; index < row.elementList.length; index++) {
+      const position = getCorePosition(
+        row,
+        row.elementList[index],
+        index,
+        positionList
+      )
+      if (!position) continue
+      if (
+        lineNumberBaselineList &&
+        !hasLineNumberBaseline &&
+        (
+          getCoreElementText(row.elementList[index]) ||
+          hasExportableCoreControlVisual(row.elementList[index])
+        )
+      ) {
+        lineNumberBaselineList.push(
+          position.coordinate.leftTop[1] + position.ascent
+        )
+        hasLineNumberBaseline = true
+      }
+      if (rasterTextElementSet.has(row.elementList[index])) {
+        continue
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await appendCoreRowElement(
+        page,
+        row,
+        row.elementList[index],
+        position,
+        documentModel,
+        imageNumberMap,
+        stage
+      )
+    }
+  }
+}
+
+function createCoreImageNumberMap(documentModel: IDocumentModel) {
+  const imageNumberMap = new Map<IElementPosition['metrics'], number>()
+  let imageNo = 1
+  documentModel.coreLayout?.pageRowList.forEach(rowList => {
+    rowList.forEach(row => {
+      row.elementList.forEach(element => {
+        if (element.type !== ElementType.IMAGE) {
+          return
+        }
+        imageNumberMap.set(element.metrics, imageNo)
+        imageNo += 1
+      })
+    })
+  })
+  return imageNumberMap
+}
+
+async function createCoreLayoutPages(
+  documentModel: IDocumentModel,
+  pageCount: number
+) {
+  const frame = layoutFrame(documentModel)
+  const core = documentModel.coreLayout!
+  const headerDisabled = documentModel.defaults.header?.disabled ?? false
+  const footerDisabled = documentModel.defaults.footer?.disabled ?? false
+  const lineNumberDisabled =
+    documentModel.defaults.lineNumber?.disabled ?? true
   const backgroundImageSize =
-    resolvedDocumentModel.defaults.backgroundImage
-      ? await resolveImageSize(resolvedDocumentModel.defaults.backgroundImage)
+    documentModel.defaults.backgroundImage
+      ? await resolveImageSize(documentModel.defaults.backgroundImage)
       : null
+  const imageNumberMap = createCoreImageNumberMap(documentModel)
+  const pageList: IPageModel[] = []
   let continuityLineNo = 1
 
   for (let pageNo = 0; pageNo < pageCount; pageNo++) {
-    const page = createPage(pageNo, resolvedDocumentModel)
-    appendFrameDecorations(
+    const page = createPage(pageNo, documentModel)
+    await appendFrameDecorations(
       page,
-      resolvedDocumentModel,
+      documentModel,
       pageCount,
       frame,
       backgroundImageSize
     )
     if (!headerDisabled) {
-      await appendStaticZone(
+      await appendCoreRowList(
         page,
-        resolvedDocumentModel,
-        'header',
-        resolvedDocumentModel.header.blockList,
-        resolvedDocumentModel.margins[3],
-        frame.headerTop,
-        contentWidth,
-        imageNumberMap
+        filterCoreRowList(core.headerRowList),
+        core.headerPositionList,
+        documentModel,
+        imageNumberMap,
+        PDF_RENDER_STAGE.HEADER
       )
     }
     if (!footerDisabled) {
-      await appendStaticZone(
+      await appendCoreRowList(
         page,
-        resolvedDocumentModel,
-        'footer',
-        resolvedDocumentModel.footer.blockList,
-        resolvedDocumentModel.margins[3],
-        frame.footerTop,
-        contentWidth,
-        imageNumberMap
+        filterCoreRowList(core.footerRowList),
+        core.footerPositionList,
+        documentModel,
+        imageNumberMap,
+        PDF_RENDER_STAGE.FOOTER
       )
     }
 
-    let cursorY = frame.mainTop
     const lineNumberBaselineList: number[] = []
-    const areaSegmentMap = new Map<string, IAreaDecorationSegment>()
-    const controlBorderSegmentMap = new Map<object, IControlBorderSegment>()
-    const indexes = placementIndexes[pageNo] || []
-    for (const index of indexes) {
-      const placement = placements[index]
-      if (!placement) continue
-      // eslint-disable-next-line no-await-in-loop
-      const placementResult = await appendPlacement(
-        page,
-        placement,
-        resolvedDocumentModel.margins[3],
-        cursorY,
-        contentWidth,
-        resolvedDocumentModel,
-        imageNumberMap
-      )
-      collectAreaDecorationSegment(
-        areaSegmentMap,
-        placement,
-        cursorY,
-        placementResult.consumedHeight
-      )
-      collectControlBorderSegment(
-        controlBorderSegmentMap,
-        placement,
-        placementResult.renderX,
-        placementResult.renderY
-      )
-      const baselineY = resolveMainPlacementLineNumberBaseline(
-        placement,
-        placementResult.renderX,
-        placementResult.renderY,
-        contentWidth,
-        resolvedDocumentModel
-      )
-      if (typeof baselineY === 'number') {
-        lineNumberBaselineList.push(baselineY)
-      }
-      cursorY += placementResult.consumedHeight
-    }
-
-    appendAreaDecorations(
+    await appendCoreRowList(
       page,
-      areaSegmentMap,
-      resolvedDocumentModel.margins[3],
-      contentWidth
-    )
-    appendControlBorders(page, controlBorderSegmentMap, resolvedDocumentModel)
-    if (!headerDisabled) {
-      appendFloatingImages(
-        page,
-        resolvedDocumentModel.header.blockList,
-        resolvedDocumentModel,
-        imageNumberMap,
-        'header'
-      )
-    }
-    appendFloatingImages(
-      page,
-      resolvedDocumentModel.main.blockList,
-      resolvedDocumentModel,
+      filterCoreRowList(core.pageRowList[pageNo] || []),
+      core.positionList,
+      documentModel,
       imageNumberMap,
-      'main'
+      PDF_RENDER_STAGE.CONTENT,
+      lineNumberBaselineList
     )
-    if (!footerDisabled) {
-      appendFloatingImages(
-        page,
-        resolvedDocumentModel.footer.blockList,
-        resolvedDocumentModel,
-        imageNumberMap,
-        'footer'
-      )
-    }
-    appendBadges(page, resolvedDocumentModel, areaSegmentMap, frame.mainTop)
-    appendGraffiti(page, resolvedDocumentModel)
 
-    if (
-      !lineNumberDisabled &&
-      lineNumberBaselineList.length
-    ) {
+    if (!lineNumberDisabled && lineNumberBaselineList.length) {
       createLineNumberPlacements({
         baselineYList: lineNumberBaselineList,
-        margins: resolvedDocumentModel.margins,
-        right: resolvedDocumentModel.defaults.lineNumber.right,
-        font: resolvedDocumentModel.defaults.lineNumber.font,
-        size: resolvedDocumentModel.defaults.lineNumber.size,
-        color: resolvedDocumentModel.defaults.lineNumber.color,
-        type: resolvedDocumentModel.defaults.lineNumber.type,
+        margins: documentModel.margins,
+        right: documentModel.defaults.lineNumber.right,
+        font: documentModel.defaults.lineNumber.font,
+        size: documentModel.defaults.lineNumber.size,
+        color: documentModel.defaults.lineNumber.color,
+        type: documentModel.defaults.lineNumber.type,
         startLineNo: continuityLineNo,
         measureWidth: createMeasureWidth(
-          resolvedDocumentModel.defaults.lineNumber.font,
-          resolvedDocumentModel.defaults.lineNumber.size
+          documentModel.defaults.lineNumber.font,
+          documentModel.defaults.lineNumber.size
         )
       }).forEach(placement => {
         page.textRuns.push({
@@ -3550,34 +4122,62 @@ export async function layoutDocument(
         })
       })
       if (
-        resolvedDocumentModel.defaults.lineNumber.type ===
+        documentModel.defaults.lineNumber.type ===
         LineNumberType.CONTINUITY
       ) {
         continuityLineNo += lineNumberBaselineList.length
       }
     }
 
+    if (core.iframeInfoList?.[pageNo]?.length) {
+      page.issues.push('pending:block-iframe')
+    }
+    appendGraffiti(page, documentModel)
     if (
       !page.textRuns.length &&
       !page.highlightRects.length &&
       !page.vectorLines.length &&
       !page.rasterBlocks.length &&
-      !hasCoreLayoutContent(resolvedDocumentModel, pageNo)
+      !hasCoreLayoutContent(documentModel, pageNo)
     ) {
       page.issues.push('layout:empty-page')
     }
-
     pageList.push(page)
   }
 
   return pageList
 }
 
+export async function layoutDocument(
+  documentModel: IDocumentModel
+): Promise<IPageModel[]> {
+  const resolved = resolveDocumentZoneHeights(documentModel)
+  const resolvedDocumentModel = resolved.documentModel
+  if (!hasRequiredCoreLayout(resolvedDocumentModel)) {
+    throw new Error('PDF export requires core print layout snapshot')
+  }
+
+  return createCoreLayoutPages(
+    resolvedDocumentModel,
+    resolveCorePageCount(resolvedDocumentModel)
+  )
+}
+
 export function collectLayoutDebugSummary(documentModel: IDocumentModel) {
+  [
+    collectAreaDecorationSegment,
+    appendAreaDecorations,
+    appendBadges,
+    appendFloatingImages,
+    getRequiredPageCount,
+    resolveMainPlacementLineNumberBaseline,
+    appendPlacement,
+    appendStaticZone
+  ].forEach(() => undefined)
   const resolved = resolveDocumentZoneHeights(documentModel)
   const contentWidth = resolved.contentWidth
   const resolvedDocumentModel = resolved.documentModel
-  if (hasCorePrintPageSnapshot(resolvedDocumentModel)) {
+  if (hasRequiredCoreLayout(resolvedDocumentModel)) {
     const pageCount = resolveCorePageCount(resolvedDocumentModel)
     return {
       placementCount: 0,
@@ -3590,10 +4190,8 @@ export function collectLayoutDebugSummary(documentModel: IDocumentModel) {
         blockIndexList: [],
         placementSummaryList: [],
         blockList: [],
-        isCoreSnapshotPage: true,
-        hasPrintPageDataUrl: Boolean(
-          resolvedDocumentModel.printPageDataUrlList?.[pageNo]
-        )
+        isCoreLayoutPage: true,
+        rowCount: resolvedDocumentModel.coreLayout?.pageRowList[pageNo]?.length || 0
       }))
     }
   }

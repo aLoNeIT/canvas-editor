@@ -67,7 +67,7 @@ const ZERO_WIDTH_CHAR_REG = /[\u200b-\u200d\ufeff]/g
 const SYMBOL_FONT_REG = /[\u2200-\u22ff]/
 
 function hasVisibleValue(value?: string | null) {
-  return Boolean((value || '').replace(ZERO_WIDTH_CHAR_REG, ''))
+  return Boolean((value || '').replace(ZERO_WIDTH_CHAR_REG, '').trim())
 }
 
 function hasVisibleElementValue(element: IElement) {

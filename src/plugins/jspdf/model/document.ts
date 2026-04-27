@@ -9,6 +9,8 @@ import type { RowFlex } from '../../../editor/dataset/enum/Row'
 import type { TitleLevel } from '../../../editor/dataset/enum/Title'
 import type { WatermarkType } from '../../../editor/dataset/enum/Watermark'
 import type { IAreaBadge, IBadge } from '../../../editor/interface/Badge'
+import type { IElementPosition } from '../../../editor/interface/Element'
+import type { IRow } from '../../../editor/interface/Row'
 
 export interface IDocumentGraffitiStroke {
   lineWidth: number
@@ -69,6 +71,8 @@ export interface IDocumentLayoutDefaults {
   defaultColor: string
   defaultRowMargin: number
   defaultBasicRowMarginHeight: number
+  highlightAlpha: number
+  highlightMarginHeight: number
   header: {
     top: number
     disabled: boolean
@@ -161,14 +165,17 @@ export interface IDocumentBadgeState {
 }
 
 export interface IDocumentCoreLayoutSnapshot {
-  pageRowList: any[]
-  headerRowList: any[]
-  footerRowList: any[]
+  pageRowList: IRow[][]
+  headerRowList: IRow[]
+  footerRowList: IRow[]
+  positionList: IElementPosition[]
+  headerPositionList: IElementPosition[]
+  footerPositionList: IElementPosition[]
   headerExtraHeight: number
   footerExtraHeight: number
   mainOuterHeight: number
   pageCount: number
-  iframeInfoList: any[]
+  iframeInfoList: unknown[][]
 }
 
 export interface IDocumentModel {
@@ -176,7 +183,6 @@ export interface IDocumentModel {
   height: number
   margins: number[]
   scale: number
-  printPageDataUrlList?: string[]
   disableTextRasterFallback?: boolean
   coreLayout?: IDocumentCoreLayoutSnapshot | null
   defaults: IDocumentLayoutDefaults

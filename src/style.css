@@ -379,6 +379,14 @@ ul {
   background-image: url('./assets/images/image.svg');
 }
 
+.menu-item__load-json i {
+  background-image: url('./assets/images/load-json.svg');
+}
+
+.menu-item__load-json input {
+  display: none;
+}
+
 .menu-item__image input {
   display: none;
 }

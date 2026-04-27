@@ -34,6 +34,8 @@ export interface ITextPlacement {
   strikeout?: boolean
   color?: string
   highlight?: string
+  highlightMarginHeight?: number
+  highlightOpacity?: number
   linkUrl?: string
   areaId?: string
   areaBackgroundColor?: string

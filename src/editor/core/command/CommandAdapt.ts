@@ -51,6 +51,7 @@ import {
 import {
   IEditorData,
   IEditorHTML,
+  IEditorLoadJSONPayload,
   IEditorOption,
   IEditorResult,
   IEditorText,
@@ -79,6 +80,7 @@ import {
 import { IMargin } from '../../interface/Margin'
 import { ILocationPosition, IPositionContext } from '../../interface/Position'
 import { IRange, RangeContext, RangeRect } from '../../interface/Range'
+import { IRow } from '../../interface/Row'
 import {
   IReplaceOption,
   ISearchOption,
@@ -137,6 +139,20 @@ import {
 import { IAreaBadge, IBadge } from '../../interface/Badge'
 import { IRichtextOption } from '../../interface/Command'
 import { WatermarkType } from '../../dataset/enum/Watermark'
+
+export interface ILayoutSnapshot {
+  pageRowList: IRow[][]
+  headerRowList: IRow[]
+  footerRowList: IRow[]
+  positionList: IElementPosition[]
+  headerPositionList: IElementPosition[]
+  footerPositionList: IElementPosition[]
+  headerExtraHeight: number
+  footerExtraHeight: number
+  mainOuterHeight: number
+  pageCount: number
+  iframeInfoList: unknown[][]
+}
 
 export class CommandAdapt {
   private draw: Draw
@@ -1454,6 +1470,26 @@ export class CommandAdapt {
     return this.draw.getDataURL(payload)
   }
 
+  public getLayoutSnapshot(): ILayoutSnapshot {
+    const header = this.draw.getHeader()
+    const footer = this.draw.getFooter()
+    return {
+      pageRowList: deepClone(this.draw.getPageRowList()),
+      headerRowList: deepClone(header.getRowList()),
+      footerRowList: deepClone(footer.getRowList()),
+      positionList: deepClone(
+        this.draw.getPosition().getOriginalMainPositionList()
+      ),
+      headerPositionList: deepClone(header.getPositionList()),
+      footerPositionList: deepClone(footer.getPositionList()),
+      headerExtraHeight: header.getExtraHeight(),
+      footerExtraHeight: footer.getExtraHeight(),
+      mainOuterHeight: this.draw.getMainOuterHeight(),
+      pageCount: this.draw.getPageRowList().length,
+      iframeInfoList: this.draw.getBlockParticle().pickIframeInfo()
+    }
+  }
+
   public getOptions(): DeepRequired<IEditorOption> {
     return this.options
   }
@@ -2026,6 +2062,19 @@ export class CommandAdapt {
 
   public setValue(payload: Partial<IEditorData>, options?: ISetValueOption) {
     this.draw.setValue(payload, options)
+  }
+
+  public loadJSON(
+    payload: IEditorLoadJSONPayload,
+    setValueOption?: ISetValueOption
+  ) {
+    const { data, options } = payload
+    if (options) {
+      this.updateOptions(options)
+    }
+    if (data) {
+      this.setValue(data, setValueOption)
+    }
   }
 
   public removeControl(payload?: IRemoveControlOption) {

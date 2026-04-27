@@ -435,15 +435,13 @@ export function normalizeDocument(source: IJspdfSourceState): IDocumentModel {
     main: null,
     areas: []
   }
-  const exportOptions = source.exportOptions || {}
-
   return {
     width: source.options.width,
     height: source.options.height,
     margins: [...source.options.margins],
     scale: source.options.scale,
-    printPageDataUrlList: exportOptions.__printPageDataUrlList,
-    disableTextRasterFallback: exportOptions.disableTextRasterFallback ?? true,
+    disableTextRasterFallback:
+      source.exportOptions.disableTextRasterFallback ?? true,
     coreLayout: source.coreLayout
       ? {
           ...source.coreLayout
@@ -471,6 +469,8 @@ export function normalizeDocument(source: IJspdfSourceState): IDocumentModel {
       defaultColor: source.options.defaultColor,
       defaultRowMargin: source.options.defaultRowMargin,
       defaultBasicRowMarginHeight: source.options.defaultBasicRowMarginHeight,
+      highlightAlpha: source.options.highlightAlpha,
+      highlightMarginHeight: source.options.highlightMarginHeight,
       header: {
         top: source.options.header.top,
         disabled: source.options.header.disabled

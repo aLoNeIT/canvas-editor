@@ -6,6 +6,14 @@ const DEFAULT_TEXT_DECORATION_LINE_WIDTH = 1
 function resolveCoreUnderlineModelY(placement: ITextPlacement) {
   const lineWidth = DEFAULT_TEXT_DECORATION_LINE_WIDTH
   const baselineShift = placement.baselineShift || 0
+  if (typeof placement.descent === 'number') {
+    return Math.floor(
+      placement.y +
+      placement.descent +
+      2 * lineWidth
+    )
+  }
+
   const lineDescent =
     placement.height -
     placement.baselineOffset +
